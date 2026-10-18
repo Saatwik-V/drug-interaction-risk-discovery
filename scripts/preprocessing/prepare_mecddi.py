@@ -24,6 +24,8 @@ def process_mecddi(raw_dir="data/raw/mecddi", out_dir="data/processed"):
 
     # 1. Master Drug Information
     drug_info_path = os.path.join(raw_dir, "Drug General Information.csv")
+    if not os.path.exists(drug_info_path):
+        raise FileNotFoundError(f"MecDDI Drug master file not found: {drug_info_path}")
     df_drugs = pd.read_csv(drug_info_path, dtype=str)
     print(f"  Drug master loaded: {len(df_drugs):,} records")
 
@@ -48,6 +50,8 @@ def process_mecddi(raw_dir="data/raw/mecddi", out_dir="data/processed"):
 
     # 2. Master Interaction Pairs
     pair_master_path = os.path.join(raw_dir, "Drug-Drug-Interaction-Pair.csv")
+    if not os.path.exists(pair_master_path):
+        raise FileNotFoundError(f"MecDDI Pair master file not found: {pair_master_path}")
     df_pairs = pd.read_csv(pair_master_path, dtype=str)
     master_pairs = set()
     for _, row in df_pairs.iterrows():
@@ -81,8 +85,7 @@ def process_mecddi(raw_dir="data/raw/mecddi", out_dir="data/processed"):
     for mfile in mechanism_files:
         fpath = os.path.join(raw_dir, mfile)
         if not os.path.exists(fpath):
-            print(f"  WARNING: Missing mechanism file {mfile}")
-            continue
+            raise FileNotFoundError(f"Required MecDDI mechanism file missing: {fpath}")
         df_mech = pd.read_csv(fpath, dtype=str)
         total_raw_mech_rows += len(df_mech)
         for _, row in df_mech.iterrows():

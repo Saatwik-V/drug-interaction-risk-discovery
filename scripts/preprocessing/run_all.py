@@ -40,6 +40,8 @@ def run_pipeline():
 
     print("\n>>> Step 5/6: Executing Data Validation Checks...")
     report = run_validation()
+    if report.get("status") != "PASSED":
+        raise RuntimeError(f"Pipeline validation failed with status: {report.get('status')}")
 
     print("\n>>> Step 6/6: Generating ER Diagrams...")
     generate_drawio_xml()

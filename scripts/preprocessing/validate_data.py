@@ -76,6 +76,11 @@ def run_validation(proc_dir="data/processed"):
     add_check("severity_domain_validity", invalid_sev == 0,
               f"All severity levels belong to permitted domain (violations: {invalid_sev})")
 
+    pair_ids = set(df_pairs['pair_id'].astype(int))
+    unmatched_sev_pairs = set(df_sev['pair_id'].astype(int)) - pair_ids
+    add_check("severity_pair_referential_integrity", len(unmatched_sev_pairs) == 0,
+              f"All severity pair_ids exist in canonical_ddi_pairs (unmatched: {len(unmatched_sev_pairs)})")
+
     # 4. Load mechanisms
     mech_path = os.path.join(proc_dir, "canonical_ddi_mechanisms.csv")
     df_mech = pd.read_csv(mech_path)
@@ -94,6 +99,26 @@ def run_validation(proc_dir="data/processed"):
     invalid_mech = (~df_mech['mechanism_category'].isin(valid_mechanisms)).sum()
     add_check("mechanism_domain_validity", invalid_mech == 0,
               f"All mechanism categories belong to permitted 7 categories (violations: {invalid_mech})")
+
+    unmatched_mech_pairs = set(df_mech['pair_id'].astype(int)) - pair_ids
+    add_check("mechanism_pair_referential_integrity", len(unmatched_mech_pairs) == 0,
+              f"All mechanism pair_ids exist in canonical_ddi_pairs (unmatched: {len(unmatched_mech_pairs)})")
+
+    # 5. Load and validate drug source mappings
+    maps_path = os.path.join(proc_dir, "drug_source_mappings.csv")
+    if os.path.exists(maps_path):
+        df_maps = pd.read_csv(maps_path)
+        report["metrics"]["total_source_mappings"] = len(df_maps)
+        # Foreign key integrity
+        unmatched_map_drugs = set(df_maps['drug_id'].astype(int)) - drug_ids
+        add_check("mapping_drug_referential_integrity", len(unmatched_map_drugs) == 0,
+                  f"All mapping drug_ids exist in canonical_drugs (unmatched: {len(unmatched_map_drugs)})")
+
+        # Source uniqueness: (source_name, source_drug_id) unique
+        map_tuples = list(zip(df_maps['source_name'], df_maps['source_drug_id']))
+        unique_map_tuples = len(set(map_tuples))
+        add_check("mapping_source_uniqueness", len(map_tuples) == unique_map_tuples,
+                  f"All source mappings are unique by (source_name, source_drug_id) (duplicates: {len(map_tuples) - unique_map_tuples})")
 
     # Write report
     report_path = os.path.join(proc_dir, "validation_report.json")

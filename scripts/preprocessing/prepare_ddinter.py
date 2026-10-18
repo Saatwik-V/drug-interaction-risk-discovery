@@ -18,6 +18,8 @@ import pandas as pd
 def process_ddinter(raw_dir="data/raw/ddinter", out_dir="data/processed"):
     os.makedirs(out_dir, exist_ok=True)
     files = sorted(glob.glob(os.path.join(raw_dir, "*.csv")))
+    if not files:
+        raise FileNotFoundError(f"No DDInter CSV files found in {raw_dir}")
     print(f"Processing {len(files)} DDInter files...")
 
     drugs = {} # id -> name

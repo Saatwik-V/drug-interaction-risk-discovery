@@ -31,16 +31,54 @@ def build_mappings(proc_dir="data/processed"):
     df_mec_drugs = pd.read_csv(os.path.join(proc_dir, "mecddi_drugs.csv"), dtype=str)
 
     # Index MecDDI drugs by normalized name
-    mec_by_norm = {}
+    mec_by_norm = defaultdict(list)
     for _, row in df_mec_drugs.iterrows():
         norm = normalize_name(row['drug_name'])
-        mec_by_norm[norm] = row
+        mec_by_norm[norm].append(row)
 
     # Index DDInter drugs by normalized name
-    dd_by_norm = {}
+    dd_by_norm = defaultdict(list)
     for _, row in df_dd_drugs.iterrows():
         norm = normalize_name(row['drug_name'])
-        dd_by_norm[norm] = row
+        dd_by_norm[norm].append(row)
+
+    # Detect ambiguity within sources
+    ambiguities = []
+    ambiguous_norms = set()
+
+    for norm, rows in mec_by_norm.items():
+        if len(rows) > 1:
+            ambiguous_norms.add(norm)
+            ambiguities.append({
+                "normalized_name": norm,
+                "source": "MecDDI",
+                "source_ids": ";".join(r['mecddi_id'] for r in rows),
+                "original_names": ";".join(r['drug_name'] for r in rows),
+                "count": len(rows),
+                "action": "PRESERVED_SOURCE_EXCLUSIVE_NO_AUTO_MERGE"
+            })
+
+    for norm, rows in dd_by_norm.items():
+        if len(rows) > 1:
+            ambiguous_norms.add(norm)
+            ambiguities.append({
+                "normalized_name": norm,
+                "source": "DDInter",
+                "source_ids": ";".join(r['ddinter_id'] for r in rows),
+                "original_names": ";".join(r['drug_name'] for r in rows),
+                "count": len(rows),
+                "action": "PRESERVED_SOURCE_EXCLUSIVE_NO_AUTO_MERGE"
+            })
+
+    # Save exception report
+    df_ambig = pd.DataFrame(ambiguities)
+    if df_ambig.empty:
+        df_ambig = pd.DataFrame(columns=["normalized_name", "source", "source_ids", "original_names", "count", "action"])
+    df_ambig.to_csv(os.path.join(proc_dir, "mapping_ambiguity_exceptions.csv"), index=False)
+    if len(ambiguities) > 0:
+        print(f"  WARNING: Detected {len(ambiguities)} ambiguous normalized drug names! Exception report written to mapping_ambiguity_exceptions.csv")
+    else:
+        print(f"  Zero ambiguous normalized drug names detected across sources. Exception report written.")
 
     canonical_drugs = []
     source_mappings = []
@@ -58,12 +96,62 @@ def build_mappings(proc_dir="data/processed"):
         in_mec = norm in mec_by_norm
         in_dd = norm in dd_by_norm
         
+        # If ambiguous, do not cross-merge automatically!
+        if norm in ambiguous_norms:
+            if in_mec:
+                for m_row in mec_by_norm[norm]:
+                    cid = current_drug_id
+                    current_drug_id += 1
+                    canonical_drugs.append({
+                        "drug_id": cid,
+                        "canonical_name": f"{m_row['drug_name'].strip()} [MecDDI:{m_row['mecddi_id']}]",
+                        "pubchem_cid": m_row['pubchem_cid'],
+                        "inchikey": m_row['inchikey'],
+                        "smiles": m_row['smiles'],
+                        "drug_type": m_row['drug_type'],
+                        "therapeutic_class": m_row['therapeutic_class']
+                    })
+                    source_mappings.append({
+                        "mapping_id": mapping_id,
+                        "drug_id": cid,
+                        "source_name": "MecDDI",
+                        "source_drug_id": m_row['mecddi_id'],
+                        "source_drug_name": m_row['drug_name'],
+                        "match_method": "AMBIGUOUS_SOURCE_EXCLUSIVE"
+                    })
+                    mapping_id += 1
+                    mec_to_canonical[m_row['mecddi_id']] = cid
+            if in_dd:
+                for d_row in dd_by_norm[norm]:
+                    cid = current_drug_id
+                    current_drug_id += 1
+                    canonical_drugs.append({
+                        "drug_id": cid,
+                        "canonical_name": f"{d_row['drug_name'].strip()} [DDInter:{d_row['ddinter_id']}]",
+                        "pubchem_cid": "",
+                        "inchikey": "",
+                        "smiles": "",
+                        "drug_type": "",
+                        "therapeutic_class": ""
+                    })
+                    source_mappings.append({
+                        "mapping_id": mapping_id,
+                        "drug_id": cid,
+                        "source_name": "DDInter",
+                        "source_drug_id": d_row['ddinter_id'],
+                        "source_drug_name": d_row['drug_name'],
+                        "match_method": "AMBIGUOUS_SOURCE_EXCLUSIVE"
+                    })
+                    mapping_id += 1
+                    dd_to_canonical[d_row['ddinter_id']] = cid
+            continue
+
         cid = current_drug_id
         current_drug_id += 1
 
         if in_mec and in_dd:
-            m_row = mec_by_norm[norm]
-            d_row = dd_by_norm[norm]
+            m_row = mec_by_norm[norm][0]
+            d_row = dd_by_norm[norm][0]
             
             canonical_name = m_row['drug_name'].strip()
             canonical_drugs.append({
@@ -101,7 +189,7 @@ def build_mappings(proc_dir="data/processed"):
             dd_to_canonical[d_row['ddinter_id']] = cid
             
         elif in_mec:
-            m_row = mec_by_norm[norm]
+            m_row = mec_by_norm[norm][0]
             canonical_drugs.append({
                 "drug_id": cid,
                 "canonical_name": m_row['drug_name'].strip(),
@@ -123,7 +211,7 @@ def build_mappings(proc_dir="data/processed"):
             mec_to_canonical[m_row['mecddi_id']] = cid
             
         elif in_dd:
-            d_row = dd_by_norm[norm]
+            d_row = dd_by_norm[norm][0]
             canonical_drugs.append({
                 "drug_id": cid,
                 "canonical_name": d_row['drug_name'].strip(),
