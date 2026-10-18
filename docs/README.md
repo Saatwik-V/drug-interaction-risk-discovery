@@ -22,13 +22,26 @@ This directory serves as the central documentation repository for the **Patient-
 
 ---
 
-## 2. Documentation Subdirectories
+## 2. Phase 1 Deliverables Index
 
-The following folders are reserved for project artifacts generated during subsequent phases. They will be populated with genuine artifacts as implementation progresses; no placeholder or fabricated artifacts should be added prematurely:
+### 2.1 Database Design & Architecture
+- **[ER Diagram (Editable draw.io XML)](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/ER_DIAGRAM.drawio)**: Valid editable diagrams.net diagram with PK/FKs, entities, and relationship cardinalities.
+- **[ER Diagram (Vector PDF Export)](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/ER_DIAGRAM.pdf)**: High-resolution vector export for reporting and submission.
+- **[ER Diagram (PNG Export)](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/ER_DIAGRAM.png)**: High-resolution raster preview.
+- **[Relational Schema Specification](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/RELATIONAL_SCHEMA.md)**: Full formal relational notation, primary/foreign keys, CHECK constraints, and referential actions.
+- **[Data Dictionary](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/DATA_DICTIONARY.md)**: Comprehensive column-level catalog with data types, nullability, constraints, and provenance origins.
+- **[Normalization Analysis](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/NORMALIZATION.md)**: Functional dependency proofs for BCNF and 4NF, explaining unordered pair deduplication and provenance isolation.
+- **[Neo4j Graph Schema](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/GRAPH_SCHEMA.md)**: Property graph node labels, relationship types, edge property design, and multi-hop traversal semantics.
+- **[Technology Justification](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/TECHNOLOGY_JUSTIFICATION.md)**: Architectural rationale for PostgreSQL + Neo4j, Next.js, and analysis regarding vector databases vs. graph stores under the course rubric.
 
-- **[`architecture/`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/architecture)**: System architecture diagrams, component interaction flows, and technology justifications (PostgreSQL + Neo4j + Next.js).
-- **[`database-design/`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design)**: Entity-Relationship (ER) diagrams, relational table definitions, schema normalization notes, and Neo4j graph property graph models (labels, relationships, properties).
-- **[`data-dictionary/`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/data-dictionary)**: Detailed column/attribute and node/edge descriptions, data types, constraints, and provenance metadata.
-- **[`testing/`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/testing)**: Test strategies, unit/integration test plans, security verification logs, and test coverage summaries.
-- **[`experiments/`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/experiments)**: Empirical evaluation logs, query execution plan comparisons, graph traversal depth/performance benchmarks, and detection coverage reports.
-- **[`screenshots/`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/screenshots)**: Real application screenshots demonstrating UI flows, RBAC behavior (Doctor vs. Admin), patient views, and risk explanation graphs.
+### 2.2 Data Audit & Manifests
+- **[Source Data Audit Report](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/data-dictionary/source-audit.md)**: Deep statistical audit of all 17 CSV files (row counts, unique entities, pairs, severity distributions, mechanisms, and cross-source mapping).
+- **[Data Sources & Licensing](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/data/manifests/data_sources.md)**: Terms of service, CC BY-NC-SA 4.0 conditions, MecDDI All-Rights-Reserved notices, and data boundaries.
+- **[Source Manifest CSV](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/data/manifests/source_manifest.csv)**: SHA-256 checksums, byte sizes, and metadata records for all 17 source files.
+- **[Validation Report (JSON)](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/data/processed/validation_report.json)**: Automated integrity report verifying 0 invariant violations across 219,040 canonical pairs and 1,968 drugs.
+
+### 2.3 Implementation Scripts
+- **PostgreSQL DDL**: [`database/postgres/01_schema.sql`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/database/postgres/01_schema.sql), [`database/postgres/02_constraints_indexes.sql`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/database/postgres/02_constraints_indexes.sql), [`database/postgres/03_seed_synthetic.sql`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/database/postgres/03_seed_synthetic.sql), [`database/postgres/04_required_queries.sql`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/database/postgres/04_required_queries.sql).
+- **Neo4j Cypher**: [`database/neo4j/01_constraints.cypher`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/database/neo4j/01_constraints.cypher), [`database/neo4j/02_import.cypher`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/database/neo4j/02_import.cypher), [`database/neo4j/03_queries.cypher`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/database/neo4j/03_queries.cypher).
+- **Preprocessing Pipeline**: [`scripts/preprocessing/run_all.py`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/scripts/preprocessing/run_all.py).
+- **Unit Invariant Tests**: [`tests/unit/test_data_invariants.py`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/tests/unit/test_data_invariants.py).

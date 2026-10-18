@@ -19,7 +19,7 @@ pids
 lib-cov
 
 # Coverage directory used by tools like istanbul
-coverage
+/coverage
 *.lcov
 
 # nyc test coverage
@@ -177,6 +177,8 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+data/synthetic/*
+!data/synthetic/.gitkeep
 
 # Database Dumps and Archive Files
 *.dump
