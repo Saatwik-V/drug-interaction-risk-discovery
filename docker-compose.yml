@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: drug-interaction-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PGUSER:-postgres}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-postgres}
+      POSTGRES_DB: ${PGDATABASE:-drug_interaction_db}
+    ports:
+      - "${PGPORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PGUSER:-postgres} -d ${PGDATABASE:-drug_interaction_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: drug-interaction-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/password123}
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4jdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+  neo4jdata:

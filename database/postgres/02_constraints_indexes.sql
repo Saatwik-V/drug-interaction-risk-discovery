@@ -161,7 +161,7 @@ BEGIN
         da.canonical_name,
         db.canonical_name,
         af.severity_level,
-        af.mechanism_category,
+        af.mechanism_category::TEXT,
         af.evidence_sources
     FROM assessment_findings af
     JOIN drugs da ON da.drug_id = af.drug_a_id

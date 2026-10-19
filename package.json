@@ -1,0 +1,33 @@
+{
+  "name": "drug-interaction-risk-discovery",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Patient-Specific Multi-Hop Drug Interaction Risk Discovery (PES University DBMS Level 3)",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test:integration": "tsx tests/integration/test_day2_integration.ts",
+    "test:auth": "tsx tests/integration/test_auth_rbac.ts"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^16.4.7",
+    "jose": "^6.2.12",
+    "neo4j-driver": "^5.28.1",
+    "next": "^14.2.24",
+    "pg": "^8.13.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.13.8",
+    "@types/pg": "^8.11.11",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}

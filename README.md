@@ -157,6 +157,9 @@ psql -U postgres -d drug_interaction_db -f database/postgres/03_seed_synthetic.s
 
 # 4. Run and verify required evaluation queries (DML, CTEs, Window functions, Joins)
 psql -U postgres -d drug_interaction_db -f database/postgres/04_required_queries.sql
+
+# 5. Apply database-level RBAC roles and least-privilege grants
+psql -U postgres -d drug_interaction_db -f database/postgres/05_roles_rbac.sql
 ```
 
 ### 6.2 Neo4j Graph Setup
@@ -171,6 +174,20 @@ cypher-shell -u neo4j -p YOUR_PASSWORD -f database/neo4j/02_import.cypher
 
 # 3. Execute multi-hop traversals and NoSQL CRUD demonstrations
 cypher-shell -u neo4j -p YOUR_PASSWORD -f database/neo4j/03_queries.cypher
+```
+
+### 6.3 Automated Test Suites
+Run the automated verification suites:
+
+```bash
+# Day 2 cross-database integration & end-to-end orchestration tests (30/30 assertions)
+npm run test:integration
+
+# Day 3 authentication, server RBAC, and database-level PostgreSQL role tests (26/26 assertions)
+npm run test:auth
+
+# Data invariant and preprocessing unit tests (11/11 tests)
+python3 -m unittest discover tests/unit/
 ```
 
 ---
@@ -196,5 +213,7 @@ For detailed guidance, see [`AGENTS.md`](file:///Users/saatwik/Documents/dbms_mi
 
 ## 9. Current Status & Next Steps
 
-- **Completed (Phase 1):** Comprehensive 17-file data audit, source manifest, licensing documentation, editable draw.io ER diagram (`.drawio`, `.pdf`, `.png`), relational schema (BCNF/4NF), data dictionary, normalization analysis, graph schema, technology justification, complete PostgreSQL DDL + procedures/triggers, Neo4j Cypher suite, preprocessing pipeline, and unit invariant tests.
-- **Next Phase (Phase 2):** Initialize the Next.js full-stack application, configure PostgreSQL/Neo4j connectivity drivers, implement server-side Route Handlers for patient screening, and build role-based views (Doctor vs. Admin).
+- **Completed (Phase 1 & Day 1):** Comprehensive 17-file data audit, source manifest, licensing documentation, editable draw.io ER diagram (`.drawio`, `.pdf`, `.png`), relational schema (BCNF/4NF), data dictionary, normalization analysis, graph schema, technology justification, complete PostgreSQL DDL + procedures/triggers, Neo4j Cypher suite, preprocessing pipeline, and unit invariant tests.
+- **Completed (Day 2):** Docker compose orchestration (Postgres 16 + Neo4j 5), runtime verification, cross-database integration orchestrator, stored procedure execution, trigger counter updates, and full API routes (`/api/patients`, `/api/patients/[id]`, `/api/patients/[id]/analyze-risk`, `/api/alerts`).
+- **Completed (Day 3 Prompt 1):** Full authentication & session management (salted bcrypt password hashing, cryptographically signed HttpOnly JWT sessions), application-level RBAC (`DOCTOR` vs `ADMIN`), database-level PostgreSQL RBAC (`role_doctor`, `role_admin`, `app_doctor_user`, `app_admin_user` with least privilege), and comprehensive automated test suite (26/26 assertions).
+- **Next Phase (Day 3 Prompt 2):** Build the Doctor interactive dashboard, patient detail/analysis interface, alerts page, and Admin management interface.

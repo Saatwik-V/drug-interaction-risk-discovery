@@ -138,9 +138,11 @@ SELECT setval('prescriptions_prescription_id_seq', (SELECT MAX(prescription_id) 
 -- ------------------------------------------------------------------------------
 -- 8. SEED USER ACCOUNTS (AUTHENTICATION & RBAC)
 -- ------------------------------------------------------------------------------
--- Pre-hashed passwords for development demonstration (e.g. 'Password@123')
+-- Pre-hashed passwords for development demonstration:
+-- admin -> 'Admin@123'
+-- dr_sharma -> 'Doctor@123'
 INSERT INTO user_accounts (user_id, username, password_hash, full_name, role, is_active) VALUES
-(1, 'admin', '$2a$12$e8YQdZ70kL8G8t9XwY3A1O8sHjWcZ6U0p1oI9qYwE7rT6uI8oP0mS', 'System Administrator', 'ADMIN', TRUE),
-(2, 'dr_sharma', '$2a$12$K8yQdZ70kL8G8t9XwY3A1O8sHjWcZ6U0p1oI9qYwE7rT6uI8oP0mS', 'Dr. Ramesh Sharma, MD', 'DOCTOR', TRUE);
+(1, 'admin', '$2b$10$B26dhZyVfX0XHvNtxofhIu3earkdclpsI2KQ6/cbSicnjjJQVQt2a', 'System Administrator', 'ADMIN', TRUE),
+(2, 'dr_sharma', '$2b$10$B26dhZyVfX0XHvNtxofhIuFNIXdPraLWZarK4ufY15U1D/ez9WZ8O', 'Dr. Ramesh Sharma, MD', 'DOCTOR', TRUE);
 
 SELECT setval('user_accounts_user_id_seq', (SELECT MAX(user_id) FROM user_accounts));
