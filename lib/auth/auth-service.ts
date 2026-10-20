@@ -37,7 +37,7 @@ export async function authenticateUser(
     FROM user_accounts
     WHERE LOWER(username) = LOWER($1) AND is_active = TRUE;
   `;
-  const res = await query<UserRow>(sql, [username.trim()]);
+  const res = await query<UserRow>(sql, [username.trim()], 'ADMIN');
   const user = res.rows[0];
 
   if (!user) {
@@ -68,7 +68,7 @@ export async function getUserById(userId: number): Promise<UserAccount | null> {
     FROM user_accounts
     WHERE user_id = $1 AND is_active = TRUE;
   `;
-  const res = await query<Omit<UserRow, 'password_hash'>>(sql, [userId]);
+  const res = await query<Omit<UserRow, 'password_hash'>>(sql, [userId], 'ADMIN');
   const user = res.rows[0];
   if (!user) return null;
 
@@ -91,7 +91,7 @@ export async function getAllUsers(): Promise<UserAccount[]> {
     FROM user_accounts
     ORDER BY user_id ASC;
   `;
-  const res = await query<Omit<UserRow, 'password_hash'>>(sql);
+  const res = await query<Omit<UserRow, 'password_hash'>>(sql, [], 'ADMIN');
   return res.rows.map((u) => ({
     userId: u.user_id,
     username: u.username,
@@ -135,7 +135,7 @@ export async function createUser(data: {
     passwordHash,
     data.fullName.trim(),
     data.role,
-  ]);
+  ], 'ADMIN');
   const newUser = res.rows[0];
 
   return {

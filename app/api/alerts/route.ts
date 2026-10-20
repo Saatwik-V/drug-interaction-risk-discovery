@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
       LIMIT 50;
     `;
 
-    const res = await query(sql);
+    const res = await query(sql, [], 'DOCTOR');
     return NextResponse.json({
       success: true,
       data: res.rows,

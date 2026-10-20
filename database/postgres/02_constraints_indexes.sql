@@ -78,7 +78,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Trigger firing on each inserted finding row
 DROP TRIGGER IF EXISTS trg_assessment_findings_count ON assessment_findings;

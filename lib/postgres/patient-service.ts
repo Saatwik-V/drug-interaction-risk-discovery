@@ -50,7 +50,7 @@ export async function getAllPatients(): Promise<Patient[]> {
     GROUP BY p.patient_id, p.mrn, p.full_name, p.date_of_birth, p.gender, p.is_synthetic
     ORDER BY p.patient_id ASC;
   `;
-  const res = await query<Patient>(sql);
+  const res = await query<Patient>(sql, [], 'DOCTOR');
   return res.rows.map((r) => ({
     ...r,
     active_medication_count: Number(r.active_medication_count || 0),
@@ -69,7 +69,7 @@ export async function getPatientById(patientId: number): Promise<Patient | null>
     FROM patients
     WHERE patient_id = $1;
   `;
-  const res = await query<Patient>(sql, [patientId]);
+  const res = await query<Patient>(sql, [patientId], 'DOCTOR');
   return res.rows[0] || null;
 }
 
@@ -92,7 +92,7 @@ export async function getActivePrescriptions(patientId: number): Promise<Prescri
     WHERE pr.patient_id = $1 AND pr.status = 'ACTIVE'
     ORDER BY pr.start_date DESC;
   `;
-  const res = await query<PrescriptionWithDrug>(sql, [patientId]);
+  const res = await query<PrescriptionWithDrug>(sql, [patientId], 'DOCTOR');
   return res.rows;
 }
 
@@ -126,7 +126,7 @@ export async function getDirectInteractionsForDrugs(
     GROUP BY dp.pair_id, dp.drug_a_id, da.canonical_name, dp.drug_b_id, db.canonical_name, ds.severity_level
     ORDER BY dp.pair_id ASC;
   `;
-  const res = await query<DirectInteractionResult>(sql, [drugIds]);
+  const res = await query<DirectInteractionResult>(sql, [drugIds], 'DOCTOR');
   return res.rows;
 }
 
@@ -149,7 +149,7 @@ export async function persistAssessmentWithFindings(
   notes: string,
   findings: FindingToInsert[]
 ): Promise<number> {
-  const pool = getPostgresPool();
+  const pool = getPostgresPool('DOCTOR');
   const client = await pool.connect();
 
   try {

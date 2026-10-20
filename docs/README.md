@@ -25,9 +25,13 @@ This directory serves as the central documentation repository for the **Patient-
 ## 2. Phase 1 Deliverables Index
 
 ### 2.1 Database Design & Architecture
-- **[ER Diagram (Editable draw.io XML)](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/ER_DIAGRAM.drawio)**: Valid editable diagrams.net diagram with PK/FKs, entities, and relationship cardinalities.
-- **[ER Diagram (Vector PDF Export)](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/ER_DIAGRAM.pdf)**: High-resolution vector export for reporting and submission.
-- **[ER Diagram (PNG Export)](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/ER_DIAGRAM.png)**: High-resolution raster preview.
+- **[Conceptual ER Diagram (draw.io XML)](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/ER_Diagram_Final.drawio)**: Editable diagrams.net Chen notation ER diagram with (min, max) structural constraints.
+- **[Conceptual ER Diagram (Vector PDF)](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/ER_Diagram_Final.pdf)**: High-resolution vector export for reporting and submission.
+- **[Conceptual ER Diagram (PNG Image)](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/ER_Diagram_Final.png)**: High-resolution raster preview.
+- **[Conceptual ER Model Specification](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/ER_MODEL.md)**: Entity, relationship, and (min, max) cardinality catalog.
+- **[Relational Schema Diagram (draw.io XML)](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/Relational_Schema_Final.drawio)**: Editable diagrams.net relational table diagram with FK connectors and constraints.
+- **[Relational Schema Diagram (Vector PDF)](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/Relational_Schema_Final.pdf)**: Vector export of relational table layouts.
+- **[Relational Schema Diagram (PNG Image)](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/Relational_Schema_Final.png)**: High-resolution raster preview.
 - **[Relational Schema Specification](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/RELATIONAL_SCHEMA.md)**: Full formal relational notation, primary/foreign keys, CHECK constraints, and referential actions.
 - **[Data Dictionary](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/DATA_DICTIONARY.md)**: Comprehensive column-level catalog with data types, nullability, constraints, and provenance origins.
 - **[Normalization Analysis](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/NORMALIZATION.md)**: Functional dependency proofs for BCNF and 4NF, explaining unordered pair deduplication and provenance isolation.

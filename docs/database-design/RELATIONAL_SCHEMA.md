@@ -1,8 +1,12 @@
 # Relational Database Schema Specification
 
 **Project:** Patient-Specific Multi-Hop Drug Interaction Risk Discovery  
-**DBMS:** PostgreSQL 15+  
-**Course:** PES University DBMS Experiential Learning Level 3  
+**DBMS:** PostgreSQL 16  
+**Course:** PES University DBMS Experiential Learning Level 3 (August–December 2026)  
+**Schema Artifacts:**
+- **Diagram (Draw.io XML):** [`Relational_Schema_Final.drawio`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/Relational_Schema_Final.drawio)
+- **Vector Document (PDF):** [`Relational_Schema_Final.pdf`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/Relational_Schema_Final.pdf)
+- **High-Resolution Raster (PNG):** [`Relational_Schema_Final.png`](file:///Users/saatwik/Documents/dbms_mini_project/drug-interaction-risk-discovery/docs/database-design/Relational_Schema_Final.png)
 
 ---
 
@@ -12,18 +16,18 @@ Relations are presented in standard relational notation:
 `RELATION_NAME (attribute_1 [PK], attribute_2 [FK], ...)`
 
 Key designations:
-- **`PK`**: Primary Key
-- **`FK`**: Foreign Key (references target table and attribute)
+- **`PK`**: Primary Key (surrogate or natural)
+- **`FK`**: Foreign Key (references target table primary key with defined referential action)
 - **`AK` / `U`**: Alternate Key / Unique constraint
 - **`NN`**: NOT NULL constraint
-- **`CK`**: CHECK constraint
+- **`CK`**: CHECK domain integrity constraint
 
 ---
 
 ## 2. Table Specifications
 
 ### 2.1 `drugs`
-Master table storing canonical drug identities harmonized across biomedical sources.
+Master catalog storing canonical drug identities harmonized across biomedical sources (MecDDI and DDInter).
 
 `drugs (drug_id [PK], canonical_name [AK, NN], pubchem_cid, inchikey, smiles, drug_type, therapeutic_class, created_at [NN])`
 
@@ -38,6 +42,9 @@ Master table storing canonical drug identities harmonized across biomedical sour
 | `therapeutic_class`| `TEXT` | Nullable | High-level therapeutic/pharmacological indication text. |
 | `created_at` | `TIMESTAMPTZ` | `NN`, `DEFAULT CURRENT_TIMESTAMP` | Row creation audit timestamp. |
 
+- **Table Constraints:**
+  - `UNIQUE (canonical_name)`: Enforces that each chemical entity has exactly one canonical record.
+
 ---
 
 ### 2.2 `drug_source_mappings`
@@ -47,76 +54,76 @@ Maintains explicit data provenance and enables cross-referencing between externa
 
 | Attribute | Data Type | Constraints | Description & Referential Actions |
 |---|---|---|---|
-| `mapping_id` | `SERIAL` | `PK`, `NN` | Surrogate identifier for source mapping entry. |
+| `mapping_id` | `SERIAL` | `PK`, `NN` | Surrogate mapping identifier. |
 | `drug_id` | `INT` | `FK`, `NN` | `REFERENCES drugs(drug_id) ON DELETE CASCADE`. |
 | `source_name` | `VARCHAR(50)` | `NN`, `CK` | `CHECK (source_name IN ('DDInter', 'MecDDI'))`. |
-| `source_drug_id` | `VARCHAR(50)` | `NN` | Original identifier from source (e.g., `DDInter125`, `D0112`). |
-| `source_drug_name`| `VARCHAR(255)`| `NN` | Literal drug name as spelled in raw source. |
-| `match_method` | `VARCHAR(50)` | `NN` | Strategy used (e.g., `EXACT_NORMALIZED_NAME`). |
-| `created_at` | `TIMESTAMPTZ` | `NN`, `DEFAULT CURRENT_TIMESTAMP` | Audit creation timestamp. |
+| `source_drug_id` | `VARCHAR(50)` | `NN` | External source identifier (e.g., `DDInter125`, `D0112`). |
+| `source_drug_name`| `VARCHAR(255)`| `NN` | Exact drug name as reported in the raw source dataset. |
+| `match_method` | `VARCHAR(50)` | `NN` | Reconciliation method (e.g., `EXACT_NORMALIZED_NAME`). |
+| `created_at` | `TIMESTAMPTZ` | `NN`, `DEFAULT CURRENT_TIMESTAMP` | Mapping creation audit timestamp. |
 
 - **Table Constraints:**
-  - `UNIQUE (source_name, source_drug_id)`: Prevents mapping the same source record to multiple canonical drugs.
+  - `UNIQUE (source_name, source_drug_id)`: Prevents duplicate external source IDs within a single source.
 
 ---
 
 ### 2.3 `ddi_pairs`
-Stores documented unordered drug-drug interaction pairs. Enforces strict canonical ID ordering to guarantee pair uniqueness and prevent self-interactions.
+Authoritative register of unordered drug pairs known to have documented interactions.
 
 `ddi_pairs (pair_id [PK], drug_a_id [FK], drug_b_id [FK], created_at [NN])`
 
 | Attribute | Data Type | Constraints | Description & Referential Actions |
 |---|---|---|---|
-| `pair_id` | `BIGSERIAL` | `PK`, `NN` | Surrogate identifier for interaction pair. |
-| `drug_a_id` | `INT` | `FK`, `NN` | `REFERENCES drugs(drug_id) ON DELETE RESTRICT`. |
-| `drug_b_id` | `INT` | `FK`, `NN` | `REFERENCES drugs(drug_id) ON DELETE RESTRICT`. |
-| `created_at` | `TIMESTAMPTZ` | `NN`, `DEFAULT CURRENT_TIMESTAMP` | Audit timestamp. |
+| `pair_id` | `BIGSERIAL` | `PK`, `NN` | Surrogate identifier for canonical interaction pair. |
+| `drug_a_id` | `INT` | `FK`, `NN` | `REFERENCES drugs(drug_id) ON DELETE CASCADE`. |
+| `drug_b_id` | `INT` | `FK`, `NN` | `REFERENCES drugs(drug_id) ON DELETE CASCADE`. |
+| `created_at` | `TIMESTAMPTZ` | `NN`, `DEFAULT CURRENT_TIMESTAMP` | Pair record creation timestamp. |
 
 - **Table Constraints:**
-  - `CHECK (drug_a_id < drug_b_id)`: Strictly enforces `drug_a_id < drug_b_id`, preventing self-interaction (`drug_a_id = drug_b_id`) and preventing inverted duplicate pairs `(B, A)`.
-  - `UNIQUE (drug_a_id, drug_b_id)`: Enforces uniqueness of unordered pairs at the database level.
+  - `CHECK (drug_a_id < drug_b_id)`: Enforces canonical lexicographical/numeric ordering to prevent symmetric duplicates `(A, B)` vs `(B, A)` and self-interactions `(A = A)`.
+  - `UNIQUE (drug_a_id, drug_b_id)`: Guarantees uniqueness of each unordered pair.
 
 ---
 
 ### 2.4 `ddi_severities`
-Stores severity ratings sourced exclusively from DDInter. Maintains strict separation from mechanism classifications.
+Documented interaction severity ratings sourced from DDInter.
 
 `ddi_severities (severity_id [PK], pair_id [FK], severity_level [NN, CK], source_dataset [NN], source_atc_codes, created_at [NN])`
 
 | Attribute | Data Type | Constraints | Description & Referential Actions |
 |---|---|---|---|
-| `severity_id` | `BIGSERIAL` | `PK`, `NN` | Surrogate identifier for severity record. |
+| `severity_id` | `BIGSERIAL` | `PK`, `NN` | Surrogate severity row identifier. |
 | `pair_id` | `BIGINT` | `FK`, `NN` | `REFERENCES ddi_pairs(pair_id) ON DELETE CASCADE`. |
 | `severity_level` | `VARCHAR(20)` | `NN`, `CK` | `CHECK (severity_level IN ('Major', 'Moderate', 'Minor', 'Unknown'))`. |
 | `source_dataset` | `VARCHAR(50)` | `NN`, `DEFAULT 'DDInter'` | Provenance source identifier. |
-| `source_atc_codes`| `VARCHAR(100)`| Nullable | Comma-separated ATC classification codes (e.g., `A,B,L`). |
+| `source_atc_codes`| `VARCHAR(100)`| Nullable | ATC code classifications associated with the interaction pair. |
 | `created_at` | `TIMESTAMPTZ` | `NN`, `DEFAULT CURRENT_TIMESTAMP` | Audit timestamp. |
 
 - **Table Constraints:**
-  - `UNIQUE (pair_id, source_dataset)`: A single pair has exactly one authoritative severity record per source.
+  - `UNIQUE (pair_id, source_dataset)`: Ensures at most one severity rating per source dataset while supporting multi-dataset provenance in 4NF.
 
 ---
 
 ### 2.5 `ddi_mechanisms`
-Stores mechanism categories sourced exclusively from MecDDI. Allows representation of multi-mechanism pairs (up to 3 categories) without repeating columns.
+Documented interaction mechanism categories sourced from MecDDI.
 
 `ddi_mechanisms (mechanism_id [PK], pair_id [FK], mechanism_category [NN, CK], source_dataset [NN], created_at [NN])`
 
 | Attribute | Data Type | Constraints | Description & Referential Actions |
 |---|---|---|---|
-| `mechanism_id` | `BIGSERIAL` | `PK`, `NN` | Surrogate identifier for mechanism category. |
+| `mechanism_id` | `BIGSERIAL` | `PK`, `NN` | Surrogate mechanism row identifier. |
 | `pair_id` | `BIGINT` | `FK`, `NN` | `REFERENCES ddi_pairs(pair_id) ON DELETE CASCADE`. |
 | `mechanism_category`| `VARCHAR(100)`| `NN`, `CK` | `CHECK (mechanism_category IN ('Affected cellular transport', 'Affected excretion pathways', 'Affected gastrointestinal absorption', 'Affected intra_extra-hepatic metabolism', 'Affected organization distribution', 'Pharmacodynamic additive effects', 'Pharmacodynamic antagonistic effects'))`. |
 | `source_dataset` | `VARCHAR(50)` | `NN`, `DEFAULT 'MecDDI'` | Provenance source identifier. |
 | `created_at` | `TIMESTAMPTZ` | `NN`, `DEFAULT CURRENT_TIMESTAMP` | Audit timestamp. |
 
 - **Table Constraints:**
-  - `UNIQUE (pair_id, mechanism_category, source_dataset)`: Prevents duplicate category assignment for the same pair.
+  - `UNIQUE (pair_id, mechanism_category, source_dataset)`: Isolates independent multi-valued mechanism categories in 4NF.
 
 ---
 
 ### 2.6 `patients`
-Synthetic patient master table used for testing and polypharmacy evaluation.
+Synthetic patient master table used for testing polypharmacy risk screening workflows.
 
 `patients (patient_id [PK], mrn [AK, NN], full_name [NN], gender [NN, CK], date_of_birth [NN], primary_condition, is_synthetic [NN, CK], created_at [NN])`
 
@@ -128,8 +135,11 @@ Synthetic patient master table used for testing and polypharmacy evaluation.
 | `gender` | `VARCHAR(20)` | `NN`, `CK` | `CHECK (gender IN ('Male', 'Female', 'Other'))`. |
 | `date_of_birth` | `DATE` | `NN` | Date of birth. |
 | `primary_condition`| `VARCHAR(255)`| Nullable | Clinical indication / diagnosis. |
-| `is_synthetic` | `BOOLEAN` | `NN`, `CK` | `CHECK (is_synthetic = TRUE)`. Enforces that real patient data cannot be stored. |
+| `is_synthetic` | `BOOLEAN` | `NN`, `CK` | `CHECK (is_synthetic = TRUE)`. Architectural guardrail preventing real clinical data ingestion. |
 | `created_at` | `TIMESTAMPTZ` | `NN`, `DEFAULT CURRENT_TIMESTAMP` | Audit timestamp. |
+
+- **Table Constraints:**
+  - `UNIQUE (mrn)`: Ensures synthetic MRN uniqueness across patient cohorts.
 
 ---
 
@@ -146,7 +156,7 @@ Transactional medication records linking synthetic patients to prescribed canoni
 | `dosage` | `VARCHAR(100)` | `NN` | Prescribed dosage string (e.g., `20mg`). |
 | `frequency` | `VARCHAR(100)` | `NN` | Administration frequency (e.g., `Once daily`). |
 | `status` | `VARCHAR(20)` | `NN`, `CK` | `CHECK (status IN ('ACTIVE', 'DISCONTINUED', 'COMPLETED'))`. |
-| `prescribed_by` | `VARCHAR(100)` | `NN` | Prescribing physician username or identifier. |
+| `prescribed_by` | `VARCHAR(100)` | `NN` | Prescribing clinician username (audit string, no SQL FK). |
 | `start_date` | `DATE` | `NN` | Effective start date of medication regimen. |
 | `end_date` | `DATE` | Nullable | Optional termination date (`CHECK (end_date IS NULL OR end_date >= start_date)`). |
 | `created_at` | `TIMESTAMPTZ` | `NN`, `DEFAULT CURRENT_TIMESTAMP` | Audit timestamp. |
@@ -165,13 +175,16 @@ Clinical risk screening session header recording polypharmacy traversal executio
 |---|---|---|---|
 | `assessment_id` | `BIGSERIAL` | `PK`, `NN` | Surrogate assessment identifier. |
 | `patient_id` | `INT` | `FK`, `NN` | `REFERENCES patients(patient_id) ON DELETE CASCADE`. |
-| `performed_by` | `VARCHAR(100)` | `NN` | Evaluating clinician username. |
+| `performed_by` | `VARCHAR(100)` | `NN` | Evaluating clinician username (audit string, no SQL FK). |
 | `max_hop_depth` | `INT` | `NN`, `CK` | `CHECK (max_hop_depth BETWEEN 1 AND 3)`. |
 | `total_active_medications`| `INT` | `NN` | Count of active drugs evaluated in session. |
 | `direct_interaction_count`| `INT` | `NN`, `DEFAULT 0` | Count of direct (1-hop) interactions found. |
-| `multi_hop_candidate_count`| `INT` | `NN`, `DEFAULT 0` | Count of indirect (2-hop/3-hop) candidate paths. |
+| `multi_hop_candidate_count`| `INT` | `NN`, `DEFAULT 0` | Count of indirect (2-hop/3-hop) candidate paths found. |
 | `assessment_notes` | `TEXT` | Nullable | Clinician rationale or review notes. |
 | `created_at` | `TIMESTAMPTZ` | `NN`, `DEFAULT CURRENT_TIMESTAMP` | Assessment execution timestamp. |
+
+- **Trigger Maintenance:**
+  - Counts are automatically incremented by the trigger `trg_assessment_findings_count` executing `fn_update_assessment_counts()` with `SECURITY DEFINER` privileges.
 
 ---
 
@@ -188,8 +201,8 @@ Detailed interaction findings and traversal pathways identified during a risk as
 | `drug_b_id` | `INT` | `FK`, `NN` | `REFERENCES drugs(drug_id) ON DELETE RESTRICT`. |
 | `hop_count` | `INT` | `NN`, `CK` | `CHECK (hop_count BETWEEN 1 AND 3)`. |
 | `traversal_path` | `TEXT` | `NN` | Human-readable explanation path (e.g., `Aspirin -> Warfarin`). |
-| `severity_level` | `VARCHAR(20)` | Nullable | DDInter severity if direct or inferred. |
-| `mechanism_category`| `VARCHAR(100)`| Nullable | MecDDI mechanism category if direct or inferred. |
+| `severity_level` | `VARCHAR(20)` | Nullable | Point-in-time snapshot of DDInter severity. |
+| `mechanism_category`| `VARCHAR(100)`| Nullable | Point-in-time snapshot of MecDDI mechanism category. |
 | `evidence_sources`| `VARCHAR(100)` | `NN` | Data sources backing path edges (e.g., `DDInter+MecDDI`). |
 | `finding_type` | `VARCHAR(50)` | `NN`, `CK` | `CHECK (finding_type IN ('DOCUMENTED_DIRECT', 'CANDIDATE_PATHWAY'))`. |
 | `created_at` | `TIMESTAMPTZ` | `NN`, `DEFAULT CURRENT_TIMESTAMP` | Finding record timestamp. |
@@ -197,7 +210,7 @@ Detailed interaction findings and traversal pathways identified during a risk as
 ---
 
 ### 2.10 `user_accounts`
-Supports role-based authentication and authorization (Doctor vs. Admin) for API access.
+Supports role-based authentication and authorization (Doctor vs. Admin) for API and UI access.
 
 `user_accounts (user_id [PK], username [AK, NN], password_hash [NN], full_name [NN], role [NN, CK], is_active [NN], created_at [NN])`
 
@@ -205,26 +218,35 @@ Supports role-based authentication and authorization (Doctor vs. Admin) for API 
 |---|---|---|---|
 | `user_id` | `SERIAL` | `PK`, `NN` | Surrogate user identifier. |
 | `username` | `VARCHAR(100)` | `AK`, `NN` | Unique login username. |
-| `password_hash` | `VARCHAR(255)` | `NN` | Argon2id or bcrypt salted password hash. |
-| `full_name` | `VARCHAR(255)` | `NN` | Clinician or administrator name. |
+| `password_hash` | `VARCHAR(255)` | `NN` | Bcrypt salted cryptographic password hash. |
+| `full_name` | `VARCHAR(255)` | `NN` | Clinician or administrator display name. |
 | `role` | `VARCHAR(20)` | `NN`, `CK` | `CHECK (role IN ('ADMIN', 'DOCTOR'))`. |
 | `is_active` | `BOOLEAN` | `NN`, `DEFAULT TRUE` | User account status flag. |
 | `created_at` | `TIMESTAMPTZ` | `NN`, `DEFAULT CURRENT_TIMESTAMP` | Account creation timestamp. |
+
+- **Table Constraints:**
+  - `UNIQUE (username)`: Ensures unique login handles across system accounts.
 
 ---
 
 ## 3. Referential Cardinality Summary
 
-| Parent Relation | Child Relation | Cardinality | Business Meaning |
-|---|---|---|---|
-| `drugs` | `drug_source_mappings` | `1 : 0..N` | A canonical drug can map to multiple source IDs (DDInter, MecDDI). |
-| `drugs` | `ddi_pairs` (as `drug_a`) | `1 : 0..N` | A drug participates in interaction pairs as first endpoint. |
-| `drugs` | `ddi_pairs` (as `drug_b`) | `1 : 0..N` | A drug participates in interaction pairs as second endpoint. |
-| `ddi_pairs` | `ddi_severities` | `1 : 0..1` | A pair has at most one authoritative severity rating from DDInter. |
-| `ddi_pairs` | `ddi_mechanisms` | `1 : 0..N` | A pair has zero, one, or multiple mechanism categories from MecDDI. |
-| `patients` | `prescriptions` | `1 : 0..N` | A patient receives zero or more prescriptions over time. |
-| `drugs` | `prescriptions` | `1 : 0..N` | A drug is referenced in zero or more prescription records. |
-| `patients` | `risk_assessments` | `1 : 0..N` | A patient undergoes zero or more screening assessments. |
-| `risk_assessments` | `assessment_findings` | `1 : 0..N` | An assessment produces zero or more identified interaction paths. |
-| `user_accounts` | `prescriptions` | `1 : 0..N` | A clinician writes zero or more prescriptions. |
-| `user_accounts` | `risk_assessments` | `1 : 0..N` | A clinician performs zero or more risk evaluations. |
+The table below summarizes all enforced foreign key constraints and cardinality rules across the 10 relations:
+
+| Parent Relation | Child Relation | Cardinality | Enforced Foreign Key | Referential Action (ON DELETE) | Business Meaning |
+|---|---|---|---|---|---|
+| `drugs` | `drug_source_mappings` | `1 : 0..N` | `drug_source_mappings.drug_id` | `CASCADE` | A canonical drug maps to zero or more source records (DDInter, MecDDI). |
+| `drugs` | `ddi_pairs` (as `drug_a`) | `1 : 0..N` | `ddi_pairs.drug_a_id` | `CASCADE` | A drug participates in interaction pairs as first endpoint (`drug_a_id < drug_b_id`). |
+| `drugs` | `ddi_pairs` (as `drug_b`) | `1 : 0..N` | `ddi_pairs.drug_b_id` | `CASCADE` | A drug participates in interaction pairs as second endpoint. |
+| `ddi_pairs` | `ddi_severities` | `1 : 0..N` | `ddi_severities.pair_id` | `CASCADE` | A pair has zero or more severity ratings under `UNIQUE(pair_id, source_dataset)`. |
+| `ddi_pairs` | `ddi_mechanisms` | `1 : 0..N` | `ddi_mechanisms.pair_id` | `CASCADE` | A pair has zero, one, or multiple mechanism categories from MecDDI in 4NF. |
+| `patients` | `prescriptions` | `1 : 0..N` | `prescriptions.patient_id` | `CASCADE` | A patient receives zero or more prescriptions over time. |
+| `drugs` | `prescriptions` | `1 : 0..N` | `prescriptions.drug_id` | `RESTRICT` | A drug is referenced in zero or more prescription records. Deletion is restricted if prescribed. |
+| `patients` | `risk_assessments` | `1 : 0..N` | `risk_assessments.patient_id` | `CASCADE` | A patient undergoes zero or more screening assessments. |
+| `risk_assessments` | `assessment_findings` | `1 : 0..N` | `assessment_findings.assessment_id` | `CASCADE` | An assessment produces zero or more identified interaction paths. |
+| `drugs` | `assessment_findings` (as `drug_a`) | `1 : 0..N` | `assessment_findings.drug_a_id` | `RESTRICT` | First drug endpoint of an interaction finding. |
+| `drugs` | `assessment_findings` (as `drug_b`) | `1 : 0..N` | `assessment_findings.drug_b_id` | `RESTRICT` | Second drug endpoint of an interaction finding. |
+
+> [!NOTE]
+> **Audit Field Design (No Foreign Key):**  
+> `prescriptions.prescribed_by` and `risk_assessments.performed_by` record clinician usernames as text strings without physical database foreign keys to `user_accounts`. This architectural choice preserves immutable clinical audit records even if user accounts are deactivated or migrated, and prevents cross-domain locking between user authentication and patient screening transactions. In `ER_Diagram_Final.drawio`, this relationship is explicitly noted as conceptual (`dashed line`).

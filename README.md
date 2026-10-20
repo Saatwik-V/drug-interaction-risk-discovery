@@ -97,8 +97,8 @@ drug-interaction-risk-discovery/
 │   ├── README.md              # Central documentation index
 │   ├── course-requirements/   # Official DBMS Level 3 Evaluation Criteria PDF
 │   ├── project-plan/          # Project Pitch PDF & Four-Day Implementation Plan MD
-│   ├── database-design/       # ER_DIAGRAM (.drawio, .pdf, .png), RELATIONAL_SCHEMA,
-│   │                          # DATA_DICTIONARY, NORMALIZATION, GRAPH_SCHEMA, etc.
+│   ├── database-design/       # ER_Diagram_Final (.drawio, .pdf, .png), Relational_Schema_Final (.drawio, .pdf, .png),
+│   │                          # RELATIONAL_SCHEMA, DATA_DICTIONARY, NORMALIZATION, GRAPH_SCHEMA, etc.
 │   └── data-dictionary/       # source-audit.md deep statistical audit report
 │
 ├── scripts/
