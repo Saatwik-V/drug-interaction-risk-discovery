@@ -78,7 +78,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- Trigger firing on each inserted finding row
 DROP TRIGGER IF EXISTS trg_assessment_findings_count ON assessment_findings;
