@@ -219,13 +219,17 @@ The following 14 sections strictly match the 14 rows of **Table 2 in the officia
 
 ## Rubric 10: Next.js interface [3 Marks]
 
-* **Demonstration Action:** In browser at **`http://localhost:3000`**:
+* **Demonstration Action:** In browser at **`http://localhost:3000`** and pgAdmin 4:
   1. Show the **Dashboard**: Point out real-time cohort statistics (Active Patients, Total Regimens, Polypharmacy Count).
   2. Show the **Patient Registry**: Filter or search for `Robert Vance` (`SYN-PAT-1001`).
-  3. Show the **Regimen View**: Display prescription cards with dosage, frequency, and therapeutic class.
-* **Technical Concept:** Modern Web Application Architecture, Server-Side Rendering (SSR), Component Hierarchy, and CSS Tokenization.
+  3. **Live Full-Stack CRUD Demonstration (pgAdmin $\longleftrightarrow$ Next.js UI):**
+     * **CREATE:** Insert `Diana Prince` in pgAdmin $\to$ Refresh dashboard $\to$ Stat card increments from 4 to 5 and a 5th patient row appears!
+     * **UPDATE:** Prescribe active medications for Diana in pgAdmin $\to$ Refresh dashboard $\to$ Her pill updates to 2 meds and badge turns green `ELIGIBLE (>= 2 DRUGS)`.
+     * **READ & SCREEN:** Click **"Open & Analyze Risk →"** to navigate into her profile and run direct screening.
+     * **DELETE:** Delete Diana Prince in pgAdmin $\to$ Refresh dashboard $\to$ Patient disappears and dashboard seamlessly resets to 4 patients.
+* **Technical Concept:** Modern Web Application Architecture, Server-Side Rendering (SSR), Component Hierarchy, and Real-Time Database Reflection.
 * **What to Say:**
-  * *"Our web application is built with the Next.js 14 App Router using TypeScript and a bespoke Vanilla CSS design system. All interactive elements have descriptive IDs, and data is fetched server-side to prevent exposing database credentials to the browser."*
+  * *"Our Next.js 14 App Router frontend is built with pure Vanilla CSS tokens and server-side data fetching. Every database INSERT, UPDATE, and DELETE in PostgreSQL synchronously reflects in our UI state, metrics cards, and clinical eligibility badges in real time."*
 
 ---
 

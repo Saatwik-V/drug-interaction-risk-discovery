@@ -110,6 +110,43 @@ VALUES ('REAL-PAT-001', 'Real Patient Example', 'Male', '1980-01-01', 'Hypertens
 
 ---
 
+### 💻 CLI Commands (If Examiner Asks to Run in Terminal)
+
+#### A. Execute All 5 Core PostgreSQL SQL Files from Terminal (DDL, DML, Queries & RBAC)
+```bash
+# 1. Run DDL Schema (10 Tables, PKs, FKs, Check Constraints)
+docker exec -i drug-interaction-postgres psql -U postgres -d drug_interaction_db < database/postgres/01_schema.sql
+
+# 2. Run DDL Constraints, Indexes, Views, Stored Functions & Triggers
+docker exec -i drug-interaction-postgres psql -U postgres -d drug_interaction_db < database/postgres/02_constraints_indexes.sql
+
+# 3. Run DML Seed Data (All INSERT statements for drugs, pairs, patients, prescriptions)
+docker exec -i drug-interaction-postgres psql -U postgres -d drug_interaction_db < database/postgres/03_seed_synthetic.sql
+
+# 4. Run Analytical & Required Queries (Joins, CTEs, Window Functions)
+docker exec -i drug-interaction-postgres psql -U postgres -d drug_interaction_db < database/postgres/04_required_queries.sql
+
+# 5. Apply Database-Level RBAC Roles & Least-Privilege Grants (role_doctor vs role_admin)
+docker exec -i drug-interaction-postgres psql -U postgres -d drug_interaction_db < database/postgres/05_roles_rbac.sql
+```
+
+#### B. "Show Create Table" Equivalent in CLI
+*(PostgreSQL does not use MySQL's `SHOW CREATE TABLE` keyword; use either command below)*:
+
+**1. Detailed Schema Inspector (`\d+ tablename`):**
+```bash
+docker exec -i drug-interaction-postgres psql -U postgres -d drug_interaction_db -c "\d+ patients"
+```
+* **🎯 OUTPUT:** Shows column types, nullability, defaults, primary keys, check constraints (`ck_patient_synthetic`), and foreign key references.
+
+**2. Literal DDL Script (`pg_dump --schema-only`):**
+```bash
+docker exec -i drug-interaction-postgres pg_dump -U postgres -d drug_interaction_db -t patients --schema-only
+```
+* **🎯 OUTPUT:** Prints the exact raw `CREATE TABLE public.patients (...)` DDL definition.
+
+---
+
 # 4. NoSQL/Vector database creation (4 Marks)
 
 * **📍 WHERE TO RUN:** **Neo4j Browser** (`http://localhost:7474`)  
@@ -429,14 +466,65 @@ DETACH DELETE d;
 
 # 10. Next.js interface (3 Marks)
 
-* **📍 WHERE TO SHOW:** Browser at **`http://localhost:3000`**  
-* **📋 ACTIONS TO SHOW:**
-  1. Login as `dr_sharma`.
-  2. Show the **Dashboard**: Highlight summary stat cards (Active Patients, Monitored Regimens, Polypharmacy Count).
-  3. Show the **Patient Registry**: Filter or search for `Robert Vance` (`SYN-PAT-1001`).
-  4. Click **"View & Screen Regimen"**: Show active prescription cards displaying dosage, frequency, status, and therapeutic class.
+* **📍 WHERE TO SHOW:** Split screen: **Browser at `http://localhost:3000/dashboard`** on one side, **pgAdmin 4 (Query Tool)** on the other!
+
+#### A. Standard UI Dashboard Overview
+1. Log in as `dr_sharma` (`Doctor@123`).
+2. Show the **Stat Cards** at the top:
+   * **Total Synthetic Patients:** 4
+   * **Polypharmacy Candidates:** 4 (Patients with $\ge 2$ active medications)
+   * **Active Regimen Drugs:** 11
+   * **Multi-Hop Traversal Depth:** 2–3 Hops (Neo4j Cypher path search)
+3. Show the **Synthetic Patient Registry**: Point out the live table columns (MRN, Full Name, DOB, Gender, Active Medications pill, Eligibility status, and blue **"Open & Analyze Risk →"** buttons).
+4. Test the **Live Search Filter**: Type `Robert` into the search box $\to$ table dynamically filters down to `Robert Vance` in real time.
+
+---
+
+#### B. Live Full-Stack CRUD Demonstration (pgAdmin $\longleftrightarrow$ Next.js UI Live Reflection)
+*Prove to the examiner that database modifications reflect live in the UI!*
+
+**Step 1: CREATE (Insert Patient in pgAdmin $\to$ Shows Live in UI)**
+Run in pgAdmin 4:
+```sql
+INSERT INTO patients (mrn, full_name, gender, date_of_birth, primary_condition, is_synthetic)
+VALUES ('SYN-PAT-1005', 'Diana Prince', 'Female', '1985-05-15', 'Migraine & Insomnia', TRUE)
+RETURNING patient_id, mrn, full_name;
+```
+* **👀 LOOK AT THE UI:** Click **Refresh (F5)** on `http://localhost:3000/dashboard`.
+* **🎯 RESULT:** 
+  * Total Patients stat increments from **4 $\to$ 5**!
+  * **Diana Prince (`SYN-PAT-1005`)** appears as the 5th row in the registry with `0` active medications and `INSUFFICIENT DATA (< 2 DRUGS)`.
+
+**Step 2: UPDATE / PRESCRIBE (Add Active Medications in pgAdmin $\to$ UI Updates)**
+Run in pgAdmin 4:
+```sql
+INSERT INTO prescriptions (patient_id, drug_id, dosage, frequency, status, prescribed_by, start_date)
+VALUES 
+  ((SELECT patient_id FROM patients WHERE mrn = 'SYN-PAT-1005'), 1, '5mg', 'Once daily', 'ACTIVE', 'dr_sharma', CURRENT_DATE),
+  ((SELECT patient_id FROM patients WHERE mrn = 'SYN-PAT-1005'), 4, '200mg', 'Once daily', 'ACTIVE', 'dr_sharma', CURRENT_DATE);
+```
+* **👀 LOOK AT THE UI:** Click **Refresh (F5)** on the dashboard.
+* **🎯 RESULT:** 
+  * Diana Prince’s active medications pill changes from **`0` $\to$ `2`**!
+  * Her eligibility badge dynamically switches from gray to green: **`ELIGIBLE (>= 2 DRUGS)`**!
+  * Top stat card **Active Regimen Drugs** increments from **11 $\to$ 13**!
+
+**Step 3: READ & SCREEN (Click Through into Patient Details)**
+* In the UI, click the blue **"Open & Analyze Risk →"** button on Diana Prince's row.
+* It navigates to her live profile page (`/patients/...`), showing her two active prescriptions (**Warfarin 5mg** and **Amiodarone 200mg**).
+* Click the blue **"Run Discovery Analysis"** button $\to$ The Next.js API executes direct screening and immediately displays the **Major** direct interaction warning on screen!
+
+**Step 4: DELETE (Remove Test Patient in pgAdmin $\to$ Disappears from UI Cleanly)**
+Run in pgAdmin 4:
+```sql
+DELETE FROM patients WHERE mrn = 'SYN-PAT-1005';
+```
+*(Due to `ON DELETE CASCADE`, her prescriptions are automatically cleaned up as well!)*
+* **👀 LOOK AT THE UI:** Return to `http://localhost:3000/dashboard` and refresh.
+* **🎯 RESULT:** Diana Prince is completely removed, and the registry seamlessly resets to the clean 4 patient cohort with zero errors!
+
 * **🗣️ WHAT TO SAY TO EXAMINER:**  
-  *“Our Next.js 14 App Router frontend is built with pure Vanilla CSS tokens, server-side data fetching, and role-aware navigation.”*
+  *“Our Next.js 14 frontend renders server-side data directly from PostgreSQL using dynamic pools. Every database INSERT, UPDATE, and DELETE synchronously updates the UI state, metrics cards, and clinical eligibility badges in real time.”*
 
 ---
 
