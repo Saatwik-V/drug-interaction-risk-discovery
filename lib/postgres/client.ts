@@ -82,6 +82,14 @@ export function getPostgresPool(role: DatabaseRole = 'DEFAULT'): Pool {
   return defaultPool;
 }
 
+/**
+ * Returns a pool for DCL statements (CREATE USER, GRANT, REVOKE)
+ * and system catalog inspection that requires postgres superuser privileges.
+ */
+export function getAdminDclPool(): Pool {
+  return getPostgresPool('DEFAULT');
+}
+
 export async function query<T extends QueryResultRow = any>(
   text: string,
   params?: any[],

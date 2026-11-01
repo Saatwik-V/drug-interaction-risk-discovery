@@ -202,3 +202,64 @@ export async function persistAssessmentWithFindings(
     client.release();
   }
 }
+
+
+export async function createPatient(data: {
+  fullName: string;
+  mrn: string;
+  gender: string;
+  dateOfBirth: string;
+  primaryCondition?: string;
+}): Promise<Patient> {
+  const sql = `
+    INSERT INTO patients (mrn, full_name, gender, date_of_birth, primary_condition, is_synthetic)
+    VALUES ($1, $2, $3, $4, $5, TRUE)
+    RETURNING patient_id, mrn, full_name, date_of_birth::TEXT, gender, is_synthetic;
+  `;
+  const res = await query<Patient>(sql, [
+    data.mrn.trim(),
+    data.fullName.trim(),
+    data.gender,
+    data.dateOfBirth,
+    data.primaryCondition?.trim() || null,
+  ], 'ADMIN');
+  return {
+    ...res.rows[0],
+    active_medication_count: 0,
+  };
+}
+
+export async function updatePatient(
+  patientId: number,
+  data: {
+    fullName?: string;
+    gender?: string;
+    dateOfBirth?: string;
+    primaryCondition?: string;
+  }
+): Promise<Patient | null> {
+  const sql = `
+    UPDATE patients
+    SET 
+      full_name = COALESCE($2, full_name),
+      gender = COALESCE($3, gender),
+      date_of_birth = COALESCE($4::DATE, date_of_birth),
+      primary_condition = COALESCE($5, primary_condition)
+    WHERE patient_id = $1
+    RETURNING patient_id, mrn, full_name, date_of_birth::TEXT, gender, is_synthetic;
+  `;
+  const res = await query<Patient>(sql, [
+    patientId,
+    data.fullName?.trim() || null,
+    data.gender || null,
+    data.dateOfBirth || null,
+    data.primaryCondition?.trim() || null,
+  ], 'ADMIN');
+  return res.rows[0] || null;
+}
+
+export async function deletePatient(patientId: number): Promise<boolean> {
+  const sql = `DELETE FROM patients WHERE patient_id = $1;`;
+  const res = await query(sql, [patientId], 'ADMIN');
+  return (res.rowCount || 0) > 0;
+}

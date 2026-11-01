@@ -48,19 +48,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: true,
-        message: `Account '${newUser.username}' created successfully.`,
+        message: `User ${newUser.username} registered with Two-Tier Security (App Profile + PostgreSQL DCL).`,
         data: newUser,
+        dclExecuted: newUser.dclExecuted,
       },
       { status: 201 }
     );
   } catch (error: any) {
+    // Catch unique constraint violations on username
     if (error.code === '23505') {
-      // PostgreSQL unique_violation error code
       return NextResponse.json(
-        { success: false, error: 'Username already exists.' },
+        { success: false, error: 'A user account with this username already exists.' },
         { status: 409 }
       );
     }
-    return handleAuthError(error);
+    return NextResponse.json(
+      { success: false, error: error.message || 'Failed to create user account.' },
+      { status: 400 }
+    );
   }
 }

@@ -1,8 +1,11 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import AddPrescriptionModal from '@/components/modals/AddPrescriptionModal';
+import InteractionGraphViewer from '@/components/graph/InteractionGraphViewer';
+import { useToast } from '@/components/ui/Toast';
 
 interface Patient {
   patient_id: number;
@@ -11,6 +14,7 @@ interface Patient {
   date_of_birth: string;
   gender: string;
   is_synthetic: boolean;
+  primary_condition?: string | null;
 }
 
 interface Prescription {
@@ -63,16 +67,15 @@ interface AssessmentData {
     max_severity_found: string;
     max_hop_depth_searched: number;
   };
-  direct_findings: DirectInteractionResult[];
+  direct_findings: DirectInteraction[];
   multi_hop_candidates: CandidatePathway[];
   scientific_disclaimer: string;
 }
 
-type DirectInteractionResult = DirectInteraction;
-
 export default function PatientDetailPage() {
   const params = useParams();
   const patientId = params?.id as string;
+  const { addToast } = useToast();
 
   const [patient, setPatient] = useState<Patient | null>(null);
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
@@ -82,8 +85,12 @@ export default function PatientDetailPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [assessmentNotes, setAssessmentNotes] = useState('');
+  const [isAddRxModalOpen, setIsAddRxModalOpen] = useState(false);
 
-  // Fetch patient profile and active medications
+  // Editable dosage state
+  const [editingRxId, setEditingRxId] = useState<number | null>(null);
+  const [editDosageValue, setEditDosageValue] = useState('');
+
   const loadPatientData = useCallback(async () => {
     if (!patientId) return;
     setLoading(true);
@@ -101,7 +108,7 @@ export default function PatientDetailPage() {
         setPatient(data.data.patient);
         setPrescriptions(data.data.active_prescriptions || []);
       } else {
-        throw new Error(data.error || 'Failed to parse patient payload.');
+        throw new Error(data.error || 'Failed to parse patient response.');
       }
     } catch (err: any) {
       setError(err.message || 'Error communicating with database services.');
@@ -114,68 +121,179 @@ export default function PatientDetailPage() {
     loadPatientData();
   }, [loadPatientData]);
 
-  // Execute Cross-Database Risk Screening
-  const handleRunAssessment = async () => {
+  const handleRunScreening = async () => {
     if (!patientId) return;
     setAnalyzing(true);
     setError(null);
-
     try {
       const res = await fetch(`/api/patients/${patientId}/analyze-risk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          maxHopDepth: 2,
           notes: assessmentNotes.trim() || undefined,
         }),
       });
 
       const data = await res.json();
-
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Polypharmacy risk assessment failed to execute.');
+        throw new Error(data.error || 'Interaction risk analysis failed.');
       }
 
       setAssessment(data.data);
+      addToast({
+        type: 'success',
+        title: 'Risk Discovery Completed',
+        message: `Found ${data.data.summary.direct_interaction_count} direct and ${data.data.summary.multi_hop_candidate_count} multi-hop candidate paths.`,
+      });
     } catch (err: any) {
-      setError(err.message || 'Error occurred while querying relational & graph databases.');
+      setError(err.message || 'Error occurred during cross-database risk evaluation.');
+      addToast({
+        type: 'error',
+        title: 'Screening Failed',
+        message: err.message,
+      });
     } finally {
       setAnalyzing(false);
     }
   };
 
-  const getSeverityBadgeClass = (severity: string) => {
-    const s = severity?.toLowerCase();
-    if (s === 'major') return 'badge-major';
-    if (s === 'moderate') return 'badge-moderate';
-    if (s === 'minor') return 'badge-minor';
-    return 'badge-unknown';
+  const handleUpdateDosage = async (rxId: number) => {
+    if (!editDosageValue.trim()) return;
+    try {
+      const res = await fetch('/api/prescriptions', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prescriptionId: rxId,
+          dosage: editDosageValue.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        addToast({
+          type: 'success',
+          title: 'Dosage Updated (DML)',
+          message: data.message,
+        });
+        setEditingRxId(null);
+        loadPatientData();
+      }
+    } catch (err: any) {
+      addToast({ type: 'error', title: 'Update Failed', message: err.message });
+    }
   };
+
+  const handleDiscontinueRx = async (rxId: number, drugName: string) => {
+    if (!confirm(`Discontinue prescription for "${drugName}"?`)) return;
+    try {
+      const res = await fetch('/api/prescriptions', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prescriptionId: rxId,
+          action: 'DISCONTINUE',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        addToast({
+          type: 'info',
+          title: 'Prescription Discontinued',
+          message: data.message,
+        });
+        loadPatientData();
+      }
+    } catch (err: any) {
+      addToast({ type: 'error', title: 'Error', message: err.message });
+    }
+  };
+
+  // Build Graph Nodes & Edges from active prescriptions + multi-hop candidates
+  const graphElements = useMemo(() => {
+    const nodeMap = new Map<string, { id: string; name: string; type: any }>();
+    const links: Array<{ source: string; target: string; severity?: string; mechanism?: string }> = [];
+
+    // Prescribed drugs
+    prescriptions.forEach((rx) => {
+      nodeMap.set(rx.canonical_name.toLowerCase(), {
+        id: rx.canonical_name.toLowerCase(),
+        name: rx.canonical_name,
+        type: 'Prescribed',
+      });
+    });
+
+    // Direct findings
+    if (assessment?.direct_findings) {
+      assessment.direct_findings.forEach((df) => {
+        links.push({
+          source: df.drug_a_name.toLowerCase(),
+          target: df.drug_b_name.toLowerCase(),
+          severity: df.severity_level,
+          mechanism: df.mechanism_categories || 'Direct Pairwise Interaction',
+        });
+      });
+    }
+
+    // Multi-hop candidates
+    if (assessment?.multi_hop_candidates) {
+      assessment.multi_hop_candidates.forEach((cand) => {
+        cand.nodes.forEach((nName, idx) => {
+          const lower = nName.toLowerCase();
+          if (!nodeMap.has(lower)) {
+            const isBridge = cand.bridge_drugs.includes(nName);
+            nodeMap.set(lower, {
+              id: lower,
+              name: nName,
+              type: isBridge ? 'Bridge' : 'Target',
+            });
+          }
+          if (idx < cand.nodes.length - 1) {
+            const nextName = cand.nodes[idx + 1].toLowerCase();
+            links.push({
+              source: lower,
+              target: nextName,
+              severity: cand.edge_severities[idx] || 'Moderate',
+              mechanism: 'Candidate Traversal Bridge',
+            });
+          }
+        });
+      });
+    }
+
+    return {
+      nodes: Array.from(nodeMap.values()),
+      links,
+    };
+  }, [prescriptions, assessment]);
+
+  const hasPolypharmacy = prescriptions.length >= 2;
 
   if (loading) {
     return (
-      <div className="app-container">
-        <div className="card empty-state">
-          <div className="spinner" style={{ margin: '0 auto 16px', width: 32, height: 32 }} />
-          <h3>Loading synthetic patient profile #{patientId}...</h3>
-          <p>Querying demographics and active prescriptions from PostgreSQL.</p>
-        </div>
+      <div className="app-container" style={{ textAlign: 'center', padding: '64px 0' }}>
+        <div className="spinner" style={{ margin: '0 auto 16px' }} />
+        <div style={{ color: 'var(--text-muted)' }}>Retrieving patient regimen from PostgreSQL...</div>
       </div>
     );
   }
 
-  if (error && !patient) {
+  if (error || !patient) {
     return (
       <div className="app-container">
-        <div className="card" style={{ maxWidth: 600, margin: '40px auto', textAlign: 'center' }}>
-          <div className="empty-state-icon" style={{ color: 'var(--sev-major)' }}>⚠️</div>
-          <h2>Patient Profile Not Available</h2>
-          <p style={{ marginTop: 8, marginBottom: 20 }}>{error}</p>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 12 }}>
-            <button onClick={loadPatientData} className="btn btn-secondary">
-              Retry Query
-            </button>
-            <Link href="/dashboard" className="btn btn-primary">
-              Return to Patient Cohort
+        <div
+          className="card"
+          style={{
+            border: '1px solid var(--sev-major-border)',
+            background: 'var(--sev-major-bg)',
+            color: '#fca5a5',
+          }}
+        >
+          <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: 8 }}>Unable to Load Patient</h2>
+          <p>{error || 'Patient profile not found.'}</p>
+          <div style={{ marginTop: 16 }}>
+            <Link href="/dashboard" className="btn btn-secondary btn-sm">
+              &larr; Back to Patient Cohort
             </Link>
           </div>
         </div>
@@ -186,357 +304,383 @@ export default function PatientDetailPage() {
   return (
     <div className="app-container">
       {/* Navigation Breadcrumb */}
-      <div style={{ marginBottom: 20 }}>
-        <Link href="/dashboard" style={{ fontSize: '0.875rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          ← Back to Patient Cohort
+      <div style={{ marginBottom: 16 }}>
+        <Link
+          href="/dashboard"
+          style={{
+            color: 'var(--text-muted)',
+            textDecoration: 'none',
+            fontSize: '0.85rem',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          &larr; Back to Patient Cohort
         </Link>
       </div>
 
       {/* Patient Header Card */}
-      <div className="card" style={{ marginBottom: 28 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-              <span className="badge badge-synthetic">SYNTHETIC PATIENT #{patient?.patient_id}</span>
-              <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8' }}>
-                MRN: {patient?.mrn}
-              </span>
-            </div>
-            <h1>{patient?.full_name}</h1>
-            <div style={{ display: 'flex', gap: 24, marginTop: 8, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-              <div><strong>DOB:</strong> {patient?.date_of_birth}</div>
-              <div><strong>Gender:</strong> {patient?.gender}</div>
-              <div><strong>Active Medications:</strong> {prescriptions.length}</div>
-            </div>
+      <div
+        className="card"
+        style={{
+          marginBottom: 24,
+          background: 'linear-gradient(135deg, rgba(17, 24, 39, 0.95) 0%, rgba(30, 41, 59, 0.85) 100%)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 16,
+        }}
+      >
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="badge badge-doctor">PATIENT PROFILE #{patient.patient_id}</span>
+            <span className="badge badge-safe">Synthetic Ground Truth</span>
           </div>
-
-          <div>
-            <button
-              onClick={handleRunAssessment}
-              disabled={analyzing || prescriptions.length < 2}
-              className="btn btn-primary"
-              style={{ padding: '12px 24px', fontSize: '1rem' }}
-            >
-              {analyzing ? (
-                <>
-                  <div className="spinner" style={{ width: 18, height: 18 }} />
-                  Running Multi-Hop Screening...
-                </>
-              ) : (
-                'Run Polypharmacy Risk Screening ⚡'
-              )}
-            </button>
-            {prescriptions.length < 2 && (
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 6, textAlign: 'right' }}>
-                Requires ≥ 2 active medications for interaction screening.
-              </div>
-            )}
+          <h1 style={{ fontSize: '1.85rem', fontWeight: 800, color: 'var(--text-main)', marginTop: 8 }}>
+            {patient.full_name}
+          </h1>
+          <div
+            style={{
+              display: 'flex',
+              gap: 16,
+              color: 'var(--text-secondary)',
+              fontSize: '0.85rem',
+              marginTop: 6,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div>MRN: <strong style={{ color: 'var(--accent-cyan)' }}>{patient.mrn}</strong></div>
+            <div>DOB: <strong>{patient.date_of_birth}</strong></div>
+            <div>Gender: <strong>{patient.gender}</strong></div>
+            <div>
+              Condition:{' '}
+              <strong style={{ color: 'var(--text-main)' }}>
+                {patient.primary_condition || 'Cardiovascular Polypharmacy'}
+              </strong>
+            </div>
           </div>
         </div>
 
-        {/* Optional Clinical Notes Input */}
-        <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
-          <label className="form-label" htmlFor="assessment-notes">
-            Clinical Assessment Note (Optional Audit Log)
-          </label>
-          <input
-            id="assessment-notes"
-            type="text"
-            className="form-input"
-            placeholder="e.g. Pre-operative cardiac polypharmacy screening prior to stent placement"
-            value={assessmentNotes}
-            onChange={(e) => setAssessmentNotes(e.target.value)}
-            disabled={analyzing}
-          />
+        <div>
+          <button
+            onClick={() => setIsAddRxModalOpen(true)}
+            className="btn btn-primary"
+            style={{ padding: '10px 18px', fontWeight: 700 }}
+          >
+            + Order Medication Regimen
+          </button>
         </div>
       </div>
 
-      {/* Active Medication Regimen Table */}
-      <div className="card" style={{ marginBottom: 28 }}>
-        <div className="card-header">
+      {/* Active Regimen List Card */}
+      <div className="card" style={{ marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div>
-            <h2>Active Medication Regimen</h2>
-            <p style={{ fontSize: '0.875rem', marginTop: 2 }}>
-              Current verified prescriptions stored with ACID transactional integrity in PostgreSQL.
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-main)' }}>
+              Active Prescriptions ({prescriptions.length})
+            </h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 2 }}>
+              Relational prescriptions table records for patient #{patient.patient_id}. Click dosage to edit live.
             </p>
           </div>
-          <span className="badge" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#67e8f9' }}>
-            {prescriptions.length} Active Prescriptions
-          </span>
+          {!hasPolypharmacy && (
+            <span className="badge badge-moderate">Single Drug — Polypharmacy Requires &ge;2 Drugs</span>
+          )}
         </div>
 
         {prescriptions.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-state-icon">💊</div>
-            <p>No active prescriptions recorded for this patient.</p>
+          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)' }}>
+            No active prescriptions recorded for this patient. Click &quot;Order Medication Regimen&quot; above to prescribe.
           </div>
         ) : (
-          <div className="table-responsive">
+          <div style={{ overflowX: 'auto' }}>
             <table className="table">
               <thead>
                 <tr>
-                  <th>Drug Canonical Name</th>
+                  <th>Rx ID</th>
+                  <th>Drug Name</th>
                   <th>Therapeutic Class</th>
-                  <th>Dosage</th>
+                  <th>Dosage (Live Edit)</th>
                   <th>Frequency</th>
                   <th>Prescribed By</th>
                   <th>Start Date</th>
-                  <th>Status</th>
+                  <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {prescriptions.map((rx) => (
-                  <tr key={rx.prescription_id}>
-                    <td style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', color: '#a5b4fc' }}>
-                      {rx.canonical_name}
-                    </td>
-                    <td>{rx.therapeutic_class || '—'}</td>
-                    <td style={{ fontWeight: 600 }}>{rx.dosage}</td>
-                    <td>{rx.frequency}</td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{rx.prescribed_by}</td>
-                    <td style={{ color: 'var(--text-muted)' }}>{rx.start_date}</td>
-                    <td>
-                      <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399' }}>
-                        {rx.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {prescriptions.map((rx) => {
+                  const isEditing = editingRxId === rx.prescription_id;
+                  return (
+                    <tr key={rx.prescription_id}>
+                      <td style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                        #{rx.prescription_id}
+                      </td>
+                      <td style={{ fontWeight: 700, color: 'var(--text-main)' }}>
+                        {rx.canonical_name}
+                      </td>
+                      <td style={{ color: 'var(--text-secondary)' }}>
+                        {rx.therapeutic_class || 'Anticoagulant / Antiarrhythmic'}
+                      </td>
+                      <td>
+                        {isEditing ? (
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <input
+                              type="text"
+                              value={editDosageValue}
+                              onChange={(e) => setEditDosageValue(e.target.value)}
+                              className="input-field"
+                              style={{ width: 80, padding: '4px 8px', fontSize: '0.8rem' }}
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => handleUpdateDosage(rx.prescription_id)}
+                              className="btn btn-primary btn-sm"
+                              style={{ padding: '2px 8px' }}
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => setEditingRxId(null)}
+                              className="btn btn-secondary btn-sm"
+                              style={{ padding: '2px 6px' }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <span
+                            onClick={() => {
+                              setEditingRxId(rx.prescription_id);
+                              setEditDosageValue(rx.dosage);
+                            }}
+                            style={{
+                              cursor: 'pointer',
+                              borderBottom: '1px dashed var(--accent-cyan)',
+                              color: 'var(--accent-cyan)',
+                              fontWeight: 600,
+                            }}
+                            title="Click to update dosage via UPDATE SQL"
+                          >
+                            {rx.dosage} ✎
+                          </span>
+                        )}
+                      </td>
+                      <td>{rx.frequency}</td>
+                      <td style={{ fontFamily: 'monospace', color: 'var(--primary)' }}>
+                        {rx.prescribed_by}
+                      </td>
+                      <td>{rx.start_date}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          onClick={() => handleDiscontinueRx(rx.prescription_id, rx.canonical_name)}
+                          className="btn btn-secondary btn-sm"
+                          style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                        >
+                          Discontinue
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
+
+        {/* Screening Trigger Controls */}
+        <div
+          style={{
+            marginTop: 20,
+            paddingTop: 16,
+            borderTop: '1px solid var(--border-subtle)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 280 }}>
+            <input
+              type="text"
+              placeholder="Clinical audit notes (e.g., Pre-operative polypharmacy evaluation)"
+              className="input-field"
+              value={assessmentNotes}
+              onChange={(e) => setAssessmentNotes(e.target.value)}
+            />
+          </div>
+          <div>
+            <button
+              onClick={handleRunScreening}
+              disabled={analyzing || !hasPolypharmacy}
+              className="btn btn-primary"
+              style={{ padding: '12px 24px', fontWeight: 700 }}
+            >
+              {analyzing ? 'Traversing Relational & Neo4j Graphs...' : '⚡ Launch Multi-Hop Risk Discovery'}
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Assessment Failure Alert */}
-      {error && (
-        <div className="alert alert-error" role="alert" style={{ marginBottom: 28 }}>
-          <strong>Assessment Error:</strong> {error}
-        </div>
-      )}
+      {/* Interactive Force-Directed Graph Visualizer */}
+      <div className="card" style={{ marginBottom: 24 }}>
+        <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: 4 }}>
+          Embedded Interactive Neo4j Graph Visualizer
+        </h3>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+          Interactive topological view showing prescribed nodes (blue), discovered bridge nodes (amber), and target interaction candidates (red).
+        </p>
 
-      {/* Assessment Results Section */}
+        <InteractionGraphViewer
+          nodes={graphElements.nodes}
+          links={graphElements.links}
+          width={800}
+          height={340}
+        />
+      </div>
+
+      {/* Discovered Findings Cards */}
       {assessment && (
-        <div style={{ marginTop: 32 }}>
-          {/* Assessment Summary Header */}
-          <div className="card" style={{ marginBottom: 24, borderColor: 'rgba(99, 102, 241, 0.3)' }}>
-            <div className="card-header">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Summary KPI Banner */}
+          <div
+            className="card"
+            style={{
+              background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.9) 100%)',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-                  <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.2)', color: '#818cf8' }}>
-                    Assessment #{assessment.assessment_id || 'Active'}
-                  </span>
-                  <span className={`badge ${getSeverityBadgeClass(assessment.summary.max_severity_found)}`}>
-                    Max Severity: {assessment.summary.max_severity_found}
-                  </span>
+                <span className="badge badge-doctor" style={{ marginBottom: 6, display: 'inline-block' }}>
+                  SESSION ID #{assessment.assessment_id} (PERSISTED IN POSTGRESQL)
+                </span>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#f8fafc' }}>
+                  Cross-Database Dual Screening Summary
+                </h3>
+              </div>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <div style={{ textAlign: 'center', padding: '8px 14px', borderRadius: 8, background: 'rgba(239, 68, 68, 0.15)' }}>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#ef4444' }}>
+                    {assessment.summary.direct_interaction_count}
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: '#fca5a5' }}>Direct Pairwise (PostgreSQL)</div>
                 </div>
-                <h2>Polypharmacy Risk Assessment Findings</h2>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Cross-DB Engine Execution</div>
-                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#38bdf8' }}>
-                  PostgreSQL ACID + Neo4j Graph
+                <div style={{ textAlign: 'center', padding: '8px 14px', borderRadius: 8, background: 'rgba(6, 182, 212, 0.15)' }}>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#06b6d4' }}>
+                    {assessment.summary.multi_hop_candidate_count}
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: '#67e8f9' }}>Multi-Hop Bridges (Neo4j)</div>
                 </div>
-              </div>
-            </div>
-
-            {/* Metrics Grid */}
-            <div className="stat-grid" style={{ marginBottom: 16 }}>
-              <div className="stat-card">
-                <div className="stat-title">Direct Pairwise Interactions</div>
-                <div className="stat-value" style={{ color: '#f43f5e' }}>
-                  {assessment.summary.direct_interaction_count}
-                </div>
-                <div className="stat-desc">Documented in DDInter / MecDDI</div>
-              </div>
-
-              <div className="stat-card">
-                <div className="stat-title">Candidate Multi-Hop Paths</div>
-                <div className="stat-value" style={{ color: '#06b6d4' }}>
-                  {assessment.summary.multi_hop_candidate_count}
-                </div>
-                <div className="stat-desc">Discovered via Neo4j Cypher</div>
-              </div>
-
-              <div className="stat-card">
-                <div className="stat-title">Traversal Depth Bounds</div>
-                <div className="stat-value">2 – {assessment.summary.max_hop_depth_searched} Hops</div>
-                <div className="stat-desc">Cycle-bounded simple paths</div>
-              </div>
-
-              <div className="stat-card">
-                <div className="stat-title">Overall Risk Category</div>
-                <div className="stat-value" style={{ fontSize: '1.6rem' }}>
-                  <span className={`badge ${getSeverityBadgeClass(assessment.summary.max_severity_found)}`}>
-                    {assessment.summary.max_severity_found}
-                  </span>
-                </div>
-                <div className="stat-desc">Highest severity across all paths</div>
-              </div>
-            </div>
-
-            {/* Scientific Disclaimer Alert (Rubric & Integrity Requirement) */}
-            <div className="disclaimer-banner">
-              <div className="disclaimer-icon">⚠️</div>
-              <div className="disclaimer-text">
-                <strong>Academic Prototype &amp; Domain Disclaimer</strong>: {assessment.scientific_disclaimer}
               </div>
             </div>
           </div>
 
-          {/* Findings Side-by-Side Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))', gap: 24 }}>
-            {/* Section 1: Direct Pairwise Findings */}
-            <div className="card">
-              <div className="card-header">
-                <div>
-                  <h3>Direct Pairwise Interactions</h3>
-                  <p style={{ fontSize: '0.8rem', marginTop: 2 }}>
-                    Documented clinical drug-drug pairs verified in PostgreSQL.
-                  </p>
-                </div>
-                <span className="badge badge-major">
-                  {assessment.direct_findings.length} Found
-                </span>
+          {/* Direct Findings */}
+          <div className="card">
+            <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#f8fafc', marginBottom: 12 }}>
+              Direct Pairwise Documented Interactions (Relational PostgreSQL)
+            </h3>
+            {assessment.direct_findings.length === 0 ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                No direct pairwise interactions documented in DDInter or MecDDI.
               </div>
-
-              {assessment.direct_findings.length === 0 ? (
-                <div className="empty-state">
-                  <div className="empty-state-icon">✅</div>
-                  <h4>No Direct Interactions Documented</h4>
-                  <p style={{ fontSize: '0.85rem' }}>
-                    No documented pairwise drug-drug interactions exist between the active medications.
-                  </p>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  {assessment.direct_findings.map((df) => (
-                    <div
-                      key={df.pair_id}
-                      style={{
-                        background: 'rgba(15, 23, 42, 0.6)',
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: 'var(--radius-md)',
-                        padding: 16,
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                        <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.95rem' }}>
-                          <span style={{ color: '#a5b4fc' }}>{df.drug_a_name}</span>
-                          <span style={{ color: 'var(--text-muted)', margin: '0 8px' }}>↔</span>
-                          <span style={{ color: '#a5b4fc' }}>{df.drug_b_name}</span>
-                        </div>
-                        <span className={`badge ${getSeverityBadgeClass(df.severity_level)}`}>
-                          {df.severity_level}
-                        </span>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {assessment.direct_findings.map((df, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      padding: 14,
+                      borderRadius: 8,
+                      background: 'rgba(239, 68, 68, 0.08)',
+                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#f8fafc', fontSize: '0.95rem' }}>
+                        {df.drug_a_name} &harr; {df.drug_b_name}
                       </div>
-
-                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'grid', gap: 4 }}>
-                        <div>
-                          <strong>Mechanism:</strong> {df.mechanism_categories || 'Unspecified pharmacological mechanism'}
-                        </div>
-                        <div>
-                          <strong>Evidence Sources:</strong>{' '}
-                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: '#67e8f9' }}>
-                            {df.evidence_sources}
-                          </span>
-                        </div>
+                      <div style={{ fontSize: '0.78rem', color: '#cbd5e1', marginTop: 4 }}>
+                        Mechanism: {df.mechanism_categories || 'Direct interaction'}
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Section 2: Candidate Multi-Hop Pathways */}
-            <div className="card">
-              <div className="card-header">
-                <div>
-                  <h3>Candidate Multi-Hop Pathways</h3>
-                  <p style={{ fontSize: '0.8rem', marginTop: 2 }}>
-                    Mechanistic hypothesis bridges traversed via Neo4j Cypher.
-                  </p>
-                </div>
-                <span className="badge" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#67e8f9' }}>
-                  {assessment.multi_hop_candidates.length} Discovered
-                </span>
-              </div>
-
-              {assessment.multi_hop_candidates.length === 0 ? (
-                <div className="empty-state">
-                  <div className="empty-state-icon">🔍</div>
-                  <h4>No Multi-Hop Candidate Bridges</h4>
-                  <p style={{ fontSize: '0.85rem' }}>
-                    No 2-hop or 3-hop intermediary interaction bridges discovered within the active regimen.
-                  </p>
-                </div>
-              ) : (
-                <div className="pathway-container">
-                  {assessment.multi_hop_candidates.map((path, idx) => (
-                    <div key={idx} className="pathway-card">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8' }}>
-                          {path.hop_count}-Hop Traversal
-                        </span>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          {path.edge_severities.map((sev, sIdx) => (
-                            <span key={sIdx} className={`badge ${getSeverityBadgeClass(sev)}`} style={{ fontSize: '0.7rem' }}>
-                              Edge {sIdx + 1}: {sev}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Visual Pathway Breadcrumb Chain */}
-                      <div className="pathway-chain">
-                        {path.nodes.map((nodeName, nIdx) => {
-                          const isEndpoint = nIdx === 0 || nIdx === path.nodes.length - 1;
-                          const isBridge = !isEndpoint;
-
-                          return (
-                            <React.Fragment key={nIdx}>
-                              <div
-                                className={`pathway-node ${isEndpoint ? 'endpoint' : 'bridge'}`}
-                                title={isBridge ? 'Intermediary Bridge Node' : 'Prescribed Regimen Endpoint'}
-                              >
-                                {nodeName}
-                                {isBridge && (
-                                  <span style={{ fontSize: '0.65rem', marginLeft: 4, opacity: 0.8 }}>(Bridge)</span>
-                                )}
-                              </div>
-                              {nIdx < path.nodes.length - 1 && (
-                                <div className="pathway-edge">
-                                  <span className="pathway-edge-arrow">→</span>
-                                </div>
-                              )}
-                            </React.Fragment>
-                          );
-                        })}
-                      </div>
-
-                      {/* Bridge & Mechanism Metadata */}
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: 10, marginTop: 8 }}>
-                        {path.bridge_drugs.length > 0 && (
-                          <div style={{ marginBottom: 4 }}>
-                            <strong>Intermediary Bridge Drug(s):</strong>{' '}
-                            <span style={{ color: '#67e8f9', fontWeight: 600 }}>
-                              {path.bridge_drugs.join(', ')}
-                            </span>
-                          </div>
-                        )}
-                        <div>
-                          <strong>Hypothesis Rationale:</strong> Both endpoints interact with intermediary node{' '}
-                          <em>{path.bridge_drugs.join(', ')}</em>, indicating a candidate shared metabolic or competitive clearance pathway.
-                        </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <span className="badge badge-major">{df.severity_level}</span>
+                      <div style={{ fontSize: '0.7rem', fontFamily: 'monospace', color: '#94a3b8', marginTop: 4 }}>
+                        {df.evidence_sources}
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Multi-Hop Findings */}
+          <div className="card">
+            <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#f8fafc', marginBottom: 12 }}>
+              Bounded Multi-Hop Candidate Pathways (Neo4j Graph Traversal)
+            </h3>
+            {assessment.multi_hop_candidates.length === 0 ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                No multi-hop bridge pathways discovered within 2 hops.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {assessment.multi_hop_candidates.map((cand, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      padding: 14,
+                      borderRadius: 8,
+                      background: 'rgba(6, 182, 212, 0.08)',
+                      border: '1px solid rgba(6, 182, 212, 0.3)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#f8fafc', fontSize: '0.95rem' }}>
+                        {cand.nodes.join(' \u2192 ')}
+                      </div>
+                      <div style={{ fontSize: '0.78rem', color: '#cbd5e1', marginTop: 4 }}>
+                        Bridge Drug: <strong style={{ color: '#f59e0b' }}>{cand.bridge_drugs.join(', ')}</strong> ({cand.hop_count} hops)
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <span className="badge badge-moderate">Candidate Pathway</span>
+                      <div style={{ fontSize: '0.7rem', fontFamily: 'monospace', color: '#94a3b8', marginTop: 4 }}>
+                        Neo4j Cypher Traversal
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
+
+      <AddPrescriptionModal
+        isOpen={isAddRxModalOpen}
+        patientId={Number(patientId)}
+        onClose={() => setIsAddRxModalOpen(false)}
+        onSuccess={() => {
+          addToast({
+            type: 'success',
+            title: 'Medication Prescribed',
+            message: `Recorded active medication order in PostgreSQL table "prescriptions".`,
+          });
+          loadPatientData();
+        }}
+      />
     </div>
   );
 }

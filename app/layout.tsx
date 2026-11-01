@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import Navbar from '@/components/Navbar';
+import { ToastProvider } from '@/components/ui/Toast';
 
 export const metadata: Metadata = {
   title: 'RxGraph — Patient-Specific Multi-Hop Drug Interaction Risk Discovery',
@@ -16,10 +17,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <Navbar />
-        <main style={{ minHeight: 'calc(100vh - 75px)', padding: '32px 0 64px' }}>
-          {children}
-        </main>
+        <ToastProvider>
+          <Navbar />
+          <main style={{ minHeight: 'calc(100vh - 75px)', padding: '32px 0 64px' }}>
+            {children}
+          </main>
+        </ToastProvider>
       </body>
     </html>
   );

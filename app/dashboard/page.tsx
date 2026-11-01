@@ -2,6 +2,8 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
+import AddPatientModal from '@/components/modals/AddPatientModal';
+import { useToast } from '@/components/ui/Toast';
 
 interface Patient {
   patient_id: number;
@@ -21,20 +23,33 @@ interface UserProfile {
 }
 
 export default function DoctorDashboard() {
+  const { addToast } = useToast();
   const [patients, setPatients] = useState<Patient[]>([]);
   const [user, setUser] = useState<UserProfile | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
+  const fetchPatients = async () => {
+    try {
+      const res = await fetch('/api/patients');
+      if (!res.ok) throw new Error('Failed to retrieve patients from PostgreSQL.');
+      const data = await res.json();
+      if (data.success) {
+        setPatients(data.data || []);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Error fetching patients.');
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
-
     async function fetchData() {
       setLoading(true);
       setError(null);
       try {
-        // Fetch current user profile
         const userRes = await fetch('/api/auth/me');
         if (userRes.ok) {
           const userData = await userRes.json();
@@ -43,7 +58,6 @@ export default function DoctorDashboard() {
           }
         }
 
-        // Fetch patient cohort
         const patientsRes = await fetch('/api/patients');
         if (!patientsRes.ok) {
           throw new Error('Failed to retrieve patient cohort from relational database.');
@@ -68,7 +82,37 @@ export default function DoctorDashboard() {
     };
   }, []);
 
-  // Filter patients based on search input
+  const handleDeletePatient = async (patientId: number, name: string) => {
+    if (!confirm(`Are you sure you want to delete patient "${name}"? This will CASCADE and delete all their child prescriptions and assessments!`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/patients/${patientId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        addToast({
+          type: 'success',
+          title: 'Patient Deleted (CASCADE)',
+          message: data.message,
+        });
+        fetchPatients();
+      } else {
+        addToast({
+          type: 'error',
+          title: 'Deletion Failed',
+          message: data.error,
+        });
+      }
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Error',
+        message: err.message,
+      });
+    }
+  };
+
   const filteredPatients = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     if (!q) return patients;
@@ -80,7 +124,6 @@ export default function DoctorDashboard() {
     );
   }, [patients, searchQuery]);
 
-  // Cohort statistics
   const totalPatients = patients.length;
   const polypharmacyCandidates = patients.filter((p) => p.active_medication_count >= 2).length;
   const totalActiveMedications = patients.reduce(
@@ -96,78 +139,104 @@ export default function DoctorDashboard() {
         style={{
           marginBottom: 28,
           background: 'linear-gradient(135deg, rgba(17, 24, 39, 0.9) 0%, rgba(30, 41, 59, 0.8) 100%)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-              <span className={`badge ${user?.role === 'ADMIN' ? 'badge-admin' : 'badge-doctor'}`}>
-                {user?.role || 'Clinician'} Session
-              </span>
-              <span className="badge badge-synthetic">Synthetic Data Guardrail Active</span>
-            </div>
-            <h1>Clinician Screening &amp; Polypharmacy Dashboard</h1>
-            <p style={{ marginTop: 4, maxWidth: 640 }}>
-              Welcome back, <strong>{user?.fullName || 'Doctor'}</strong>. Select a patient to inspect active
-              prescriptions, trigger relational pairwise lookups, and discover bounded multi-hop candidate pathways.
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <Link href="/alerts" className="btn btn-secondary">
-              Review Alert History
-            </Link>
-          </div>
+        <div>
+          <span className="badge badge-doctor" style={{ marginBottom: 10, display: 'inline-block' }}>
+            CLINICAL OPERATING SYSTEM
+          </span>
+          <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)' }}>
+            Welcome, {user ? user.fullName : 'Doctor'}
+          </h1>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', marginTop: 4 }}>
+            Synthetic Patient Cohort &amp; Direct-to-Multi-Hop Polypharmacy Interaction Screening
+          </p>
+        </div>
+        <div>
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="btn btn-primary"
+            style={{ padding: '12px 20px', fontWeight: 700 }}
+          >
+            + Add Synthetic Patient
+          </button>
         </div>
       </div>
 
-      {/* Cohort Overview Metrics */}
-      <div className="stat-grid">
-        <div className="stat-card">
-          <div className="stat-title">Total Synthetic Patients</div>
-          <div className="stat-value">{loading ? '—' : totalPatients}</div>
-          <div className="stat-desc">Relational records in PostgreSQL</div>
+      {/* Cohort KPI Stat Cards */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+          gap: 16,
+          marginBottom: 28,
+        }}
+      >
+        <div className="card">
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Total Cohort Patients
+          </div>
+          <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-main)', marginTop: 8 }}>
+            {totalPatients}
+          </div>
+          <div style={{ color: 'var(--accent-cyan)', fontSize: '0.75rem', marginTop: 4 }}>
+            PostgreSQL Ground Truth
+          </div>
         </div>
 
-        <div className="stat-card">
-          <div className="stat-title">Polypharmacy Candidates</div>
-          <div className="stat-value" style={{ color: '#38bdf8' }}>
-            {loading ? '—' : polypharmacyCandidates}
+        <div className="card">
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Active Polypharmacy Regimens
           </div>
-          <div className="stat-desc">Patients with ≥ 2 active medications</div>
+          <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--sev-moderate)', marginTop: 8 }}>
+            {polypharmacyCandidates}
+          </div>
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: 4 }}>
+            Candidates for Graph Traversal (&ge;2 meds)
+          </div>
         </div>
 
-        <div className="stat-card">
-          <div className="stat-title">Active Regimen Drugs</div>
-          <div className="stat-value" style={{ color: '#a855f7' }}>
-            {loading ? '—' : totalActiveMedications}
+        <div className="card">
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Total Prescribed Regimen Orders
           </div>
-          <div className="stat-desc">Active prescription instances</div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-title">Multi-Hop Traversal Depth</div>
-          <div className="stat-value" style={{ color: '#10b981' }}>
-            2 – 3 Hops
+          <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--primary)', marginTop: 8 }}>
+            {totalActiveMedications}
           </div>
-          <div className="stat-desc">Bounded Neo4j Cypher path search</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: 4 }}>
+            Harmonized Rx across patient registry
+          </div>
         </div>
       </div>
 
       {/* Patient Cohort Table Card */}
       <div className="card">
-        <div className="card-header">
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 20,
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
           <div>
-            <h2>Synthetic Patient Registry</h2>
-            <p style={{ fontSize: '0.875rem', marginTop: 2 }}>
-              Select a patient record to execute an automated multi-hop interaction discovery analysis.
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-main)' }}>
+              Synthetic Patient Registry
+            </h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 2 }}>
+              Select a patient record to view active prescriptions or launch multi-hop graph risk discovery.
             </p>
           </div>
-
-          <div style={{ width: 320 }}>
+          <div style={{ minWidth: 260 }}>
             <input
               type="text"
-              className="form-input"
-              placeholder="Search by Patient Name or MRN..."
+              placeholder="Search by name, MRN, or ID..."
+              className="input-field"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -175,105 +244,98 @@ export default function DoctorDashboard() {
         </div>
 
         {error && (
-          <div className="alert alert-error" role="alert">
+          <div
+            style={{
+              padding: '12px 16px',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--sev-major-bg)',
+              border: '1px solid var(--sev-major-border)',
+              color: '#fca5a5',
+              fontSize: '0.875rem',
+              marginBottom: 16,
+            }}
+          >
             {error}
           </div>
         )}
 
         {loading ? (
-          <div className="empty-state">
-            <div className="spinner" style={{ margin: '0 auto 16px', width: 28, height: 28 }} />
-            <p>Querying patient records from PostgreSQL...</p>
+          <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-muted)' }}>
+            <div className="spinner" style={{ margin: '0 auto 16px' }} />
+            <div>Querying PostgreSQL patient records...</div>
           </div>
         ) : filteredPatients.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-state-icon">📋</div>
-            <h3>No matching patients found</h3>
-            <p style={{ marginTop: 4 }}>
-              {searchQuery
-                ? `No records matched your search query "${searchQuery}".`
-                : 'No synthetic patients currently registered.'}
-            </p>
+          <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-muted)' }}>
+            No patient records found matching query.
           </div>
         ) : (
-          <div className="table-responsive">
+          <div style={{ overflowX: 'auto' }}>
             <table className="table">
               <thead>
                 <tr>
+                  <th>ID</th>
+                  <th>Patient Name</th>
                   <th>MRN</th>
-                  <th>Patient Full Name</th>
                   <th>Date of Birth</th>
                   <th>Gender</th>
                   <th>Active Medications</th>
-                  <th>Screening Eligibility</th>
-                  <th style={{ textAlign: 'right' }}>Clinical Action</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredPatients.map((patient) => {
-                  const isEligible = patient.active_medication_count >= 2;
+                {filteredPatients.map((p) => {
+                  const hasPolypharmacy = (p.active_medication_count || 0) >= 2;
                   return (
-                    <tr key={patient.patient_id}>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                        {patient.mrn}
+                    <tr key={p.patient_id}>
+                      <td style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                        #{p.patient_id}
                       </td>
-                      <td style={{ fontWeight: 600 }}>{patient.full_name}</td>
-                      <td style={{ color: 'var(--text-secondary)' }}>{patient.date_of_birth}</td>
-                      <td>{patient.gender}</td>
+                      <td style={{ fontWeight: 600, color: 'var(--text-main)' }}>
+                        <Link
+                          href={`/patients/${p.patient_id}`}
+                          style={{ color: 'var(--text-main)', textDecoration: 'none' }}
+                        >
+                          {p.full_name}
+                        </Link>
+                      </td>
+                      <td style={{ fontFamily: 'monospace', color: 'var(--accent-cyan)' }}>
+                        {p.mrn}
+                      </td>
+                      <td>{p.date_of_birth}</td>
+                      <td>{p.gender}</td>
                       <td>
                         <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            minWidth: 26,
-                            height: 26,
-                            padding: '0 8px',
-                            borderRadius: 'var(--radius-full)',
-                            fontSize: '0.8rem',
-                            fontWeight: 700,
-                            background:
-                              patient.active_medication_count > 0
-                                ? 'rgba(99, 102, 241, 0.15)'
-                                : 'rgba(255, 255, 255, 0.05)',
-                            color: patient.active_medication_count > 0 ? '#818cf8' : 'var(--text-muted)',
-                          }}
+                          className={`badge ${
+                            hasPolypharmacy ? 'badge-major' : 'badge-doctor'
+                          }`}
                         >
-                          {patient.active_medication_count}
+                          {p.active_medication_count} active{' '}
+                          {p.active_medication_count === 1 ? 'drug' : 'drugs'}
                         </span>
                       </td>
                       <td>
-                        {isEligible ? (
-                          <span
-                            className="badge"
-                            style={{
-                              background: 'rgba(16, 185, 129, 0.15)',
-                              color: '#34d399',
-                              border: '1px solid rgba(16, 185, 129, 0.3)',
-                            }}
-                          >
-                            Eligible (≥ 2 Drugs)
-                          </span>
-                        ) : (
-                          <span
-                            className="badge"
-                            style={{
-                              background: 'rgba(148, 163, 184, 0.1)',
-                              color: 'var(--text-muted)',
-                              border: '1px solid rgba(148, 163, 184, 0.2)',
-                            }}
-                          >
-                            Single Agent (&lt; 2)
-                          </span>
-                        )}
+                        <span className="badge badge-safe">Synthetic Guarded</span>
                       </td>
                       <td style={{ textAlign: 'right' }}>
-                        <Link
-                          href={`/patients/${patient.patient_id}`}
-                          className="btn btn-primary btn-sm"
-                        >
-                          Open &amp; Analyze Risk →
-                        </Link>
+                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                          <Link
+                            href={`/patients/${p.patient_id}`}
+                            className="btn btn-secondary btn-sm"
+                          >
+                            Screen Regimen &rarr;
+                          </Link>
+                          {user?.role === 'ADMIN' && (
+                            <button
+                              onClick={() => handleDeletePatient(p.patient_id, p.full_name)}
+                              className="btn btn-sm"
+                              style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+                              title="Delete Patient (CASCADE)"
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -283,6 +345,19 @@ export default function DoctorDashboard() {
           </div>
         )}
       </div>
+
+      <AddPatientModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onSuccess={() => {
+          addToast({
+            type: 'success',
+            title: 'Patient Registered',
+            message: 'New synthetic patient created in PostgreSQL table "patients".',
+          });
+          fetchPatients();
+        }}
+      />
     </div>
   );
 }
