@@ -53,7 +53,7 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    await requireRole(request, ['DOCTOR', 'ADMIN']);
+    const session = await requireRole(request, ['DOCTOR', 'ADMIN']);
 
     const patientId = parseInt(params.id, 10);
     if (isNaN(patientId) || patientId <= 0) {
@@ -64,7 +64,7 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const updated = await updatePatient(patientId, body);
+    const updated = await updatePatient(patientId, body, session.role);
 
     if (!updated) {
       return NextResponse.json(

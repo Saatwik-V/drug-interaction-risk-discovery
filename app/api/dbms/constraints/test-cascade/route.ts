@@ -114,6 +114,11 @@ export async function POST(request: NextRequest) {
 
 /**
  * Executes DELETE on the parent patient, causing ON DELETE CASCADE across the 4 tables.
+ *
+ * Called with no `patient_id` parameter, this instead sweeps and purges ALL leftover
+ * ephemeral sandbox patients (mrn LIKE 'CASCADE-TEST-%') left behind by prior demo
+ * sessions, guaranteeing the Constraints Lab always starts from a pristine, reproducible
+ * state regardless of whether a previous demo was manually cleaned up.
  */
 export async function DELETE(request: NextRequest) {
   try {
@@ -123,7 +128,21 @@ export async function DELETE(request: NextRequest) {
     const patientId = parseInt(searchParams.get('patient_id') || '0', 10);
 
     if (!patientId) {
-      return NextResponse.json({ success: false, error: 'Missing patient_id parameter.' }, { status: 400 });
+      const swept = await query(
+        `DELETE FROM patients WHERE mrn LIKE 'CASCADE-TEST-%' RETURNING patient_id, mrn;`,
+        [],
+        'ADMIN'
+      );
+      return NextResponse.json({
+        success: true,
+        swept: true,
+        sweptCount: swept.rows.length,
+        sweptPatients: swept.rows,
+        summary:
+          swept.rows.length > 0
+            ? `Auto-cleaned ${swept.rows.length} leftover sandbox patient(s) from a previous session via ON DELETE CASCADE.`
+            : 'No leftover sandbox patients found. Constraints Lab is already pristine.',
+      });
     }
 
     // Capture counts before deletion

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireRole, handleAuthError } from '@/lib/auth/session';
-import { getAllUsers, createUser } from '@/lib/auth/auth-service';
+import { getAllUsers, createUser, deleteUser } from '@/lib/auth/auth-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,5 +66,43 @@ export async function POST(request: NextRequest) {
       { success: false, error: error.message || 'Failed to create user account.' },
       { status: 400 }
     );
+  }
+}
+
+/**
+ * Self-clean endpoint for the DCL demo: reverses a user created via the
+ * DBMS Studio Tab 6 flow (DROP USER engine role + delete application profile
+ * row), so the two-tier user-creation demo can be re-run repeatedly without
+ * ever hitting a username collision or requiring a terminal/psql cleanup.
+ * Seeded demonstration accounts are protected from deletion.
+ */
+export async function DELETE(request: NextRequest) {
+  try {
+    await requireRole(request, ['ADMIN']);
+
+    const { searchParams } = new URL(request.url);
+    const username = (searchParams.get('username') || '').trim().toLowerCase();
+
+    if (!username) {
+      return NextResponse.json({ success: false, error: 'Missing username parameter.' }, { status: 400 });
+    }
+
+    const PROTECTED_USERNAMES = ['admin', 'dr_sharma'];
+    if (PROTECTED_USERNAMES.includes(username)) {
+      return NextResponse.json(
+        { success: false, error: `Refusing to delete protected seed account '${username}'.` },
+        { status: 400 }
+      );
+    }
+
+    const result = await deleteUser(username);
+
+    return NextResponse.json({
+      success: true,
+      message: `User ${username} removed from both PostgreSQL engine (DROP USER) and application profile layer.`,
+      dclExecuted: result.dclExecuted,
+    });
+  } catch (error: any) {
+    return handleAuthError(error);
   }
 }

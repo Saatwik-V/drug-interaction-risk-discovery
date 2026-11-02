@@ -5,11 +5,13 @@
    PES University DBMS Level 3
    ============================================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* Inter and JetBrains Mono are self-hosted via next/font/google in
+   app/layout.tsx (no runtime CDN request) — --font-inter and
+   --font-jetbrains-mono are set there on the <html> element. */
 
 :root {
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), monospace;
 
   /* Color Palette - Modern Sleek Dark Mode */
   --bg-main: #0a0e17;
@@ -45,9 +47,13 @@
   --sev-moderate-bg: rgba(245, 158, 11, 0.15);
   --sev-moderate-border: rgba(245, 158, 11, 0.4);
 
-  --sev-minor: #10b981;
-  --sev-minor-bg: rgba(16, 185, 129, 0.15);
-  --sev-minor-border: rgba(16, 185, 129, 0.4);
+  --sev-minor: #3b82f6;
+  --sev-minor-bg: rgba(59, 130, 246, 0.15);
+  --sev-minor-border: rgba(59, 130, 246, 0.4);
+
+  --sev-safe: #10b981;
+  --sev-safe-bg: rgba(16, 185, 129, 0.15);
+  --sev-safe-border: rgba(16, 185, 129, 0.4);
 
   --sev-unknown: #8b5cf6;
   --sev-unknown-bg: rgba(139, 92, 246, 0.15);
@@ -87,15 +93,30 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Animated gradient subtle background */
+/* Signature background: a dual-tone glow — violet for the relational
+   (PostgreSQL) side, cyan for the graph (Neo4j) side — the same two-engine
+   contrast that defines the product, laid over a faint lattice of dots that
+   reads equally as lab-notebook graph paper and as a node network. This is
+   the one structural device repeated sitewide; everything else stays quiet. */
 body::before {
   content: '';
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 600px;
-  background: radial-gradient(circle at 50% -20%, rgba(99, 102, 241, 0.18), rgba(6, 182, 212, 0.05), transparent 70%);
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 12% -8%, rgba(124, 108, 245, 0.20), transparent 42%),
+    radial-gradient(circle at 88% -8%, rgba(45, 212, 232, 0.14), transparent 42%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 26px 26px;
+  mask-image: radial-gradient(ellipse 100% 55% at 50% 0%, black 35%, transparent 85%);
+  -webkit-mask-image: radial-gradient(ellipse 100% 55% at 50% 0%, black 35%, transparent 85%);
   pointer-events: none;
   z-index: 0;
 }
@@ -117,10 +138,47 @@ h1, h2, h3, h4, h5, h6 {
   line-height: 1.25;
 }
 
-h1 { font-size: 1.875rem; }
+h1 { font-size: 2.1rem; }
 h2 { font-size: 1.5rem; }
 h3 { font-size: 1.25rem; }
 h4 { font-size: 1.05rem; }
+
+/* Hero banner: the signature open-with-presence treatment for the first
+   card on a page. The top rule runs violet-to-cyan — PostgreSQL to Neo4j —
+   the same device as the page glow, so it reads as one deliberate idea
+   rather than decoration. Used once per page, never on ordinary cards. */
+.hero-banner {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(165deg, rgba(17, 24, 39, 0.96) 0%, rgba(13, 19, 33, 0.92) 100%);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 30px 32px;
+  box-shadow: var(--shadow-lg);
+}
+
+.hero-banner::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #7c6cf5 0%, #2dd4e8 100%);
+}
+
+.hero-title {
+  font-size: 2.35rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  color: var(--text-main);
+}
+
+@media (max-width: 768px) {
+  .hero-banner { padding: 24px 20px; }
+  .hero-title { font-size: 1.75rem; }
+}
 
 p {
   color: var(--text-secondary);
@@ -216,6 +274,12 @@ a:hover {
   background: var(--sev-unknown-bg);
   color: var(--sev-unknown);
   border: 1px solid var(--sev-unknown-border);
+}
+
+.badge-safe {
+  background: var(--sev-safe-bg);
+  color: var(--sev-safe);
+  border: 1px solid var(--sev-safe-border);
 }
 
 /* Buttons */
@@ -591,6 +655,10 @@ select.input-field option, .form-select option {
   to { transform: rotate(360deg); }
 }
 
+.spin-icon {
+  animation: spin 0.9s linear infinite;
+}
+
 /* Empty States */
 .empty-state {
   text-align: center;
@@ -622,6 +690,377 @@ select.input-field option, .form-select option {
   background: rgba(16, 185, 129, 0.12);
   border: 1px solid rgba(16, 185, 129, 0.3);
   color: #6ee7b7;
+}
+
+/* Accessibility baseline */
+*:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* StatusDot: live service/connection indicator used in the top bar health
+   strip and anywhere a service's up/down state needs a glance-able signal. */
+.status-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.status-dot-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot-indicator.healthy {
+  background: var(--sev-safe);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+
+.status-dot-indicator.degraded {
+  background: var(--sev-moderate);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+}
+
+.status-dot-indicator.down {
+  background: var(--sev-major);
+  box-shadow: 0 0 6px rgba(244, 63, 94, 0.6);
+}
+
+.status-dot-indicator.pulse {
+  animation: status-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Skeleton: loading placeholder, shimmer respects reduced-motion above */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-surface-elevated);
+  border-radius: var(--radius-sm);
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.06),
+    transparent
+  );
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Tooltip: minimal, used for terse clarifications (SQLSTATE codes, icon-only
+   buttons, truncated identifiers) */
+.tooltip-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.tooltip-bubble {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: #0d1322;
+  border: 1px solid var(--border-medium);
+  color: var(--text-main);
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+  z-index: 200;
+}
+
+.tooltip-wrapper:hover .tooltip-bubble,
+.tooltip-wrapper:focus-within .tooltip-bubble {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+
+/* KeyValue: compact label/value rows for inspector panels, patient profile
+   facts, and DCL/DDL metadata displays */
+.kv-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 16px;
+}
+
+.kv-key {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.kv-value {
+  font-size: 0.86rem;
+  color: var(--text-main);
+  font-family: var(--font-mono);
+}
+
+/* Stepper: real pipeline stages (e.g. direct screening -> multi-hop
+   traversal -> persist), never decorative numbering */
+.stepper {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+}
+
+.stepper-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.stepper-step:last-child {
+  flex: 0 0 auto;
+}
+
+.stepper-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  border: 2px solid var(--border-medium);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  transition: all var(--transition-normal);
+}
+
+.stepper-dot.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: #a5b4fc;
+  box-shadow: 0 0 0 4px var(--primary-light);
+}
+
+.stepper-dot.done {
+  border-color: var(--sev-safe);
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--sev-safe);
+}
+
+.stepper-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.stepper-label.active,
+.stepper-label.done {
+  color: var(--text-main);
+}
+
+.stepper-connector {
+  flex: 1;
+  height: 2px;
+  background: var(--border-medium);
+  margin: 0 10px;
+  transition: background var(--transition-normal);
+}
+
+.stepper-connector.done {
+  background: var(--sev-safe);
+}
+
+/* EmptyState: designed empty/zero-result views, never a blank panel */
+.empty-state-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 24px;
+  gap: 10px;
+  color: var(--text-muted);
+}
+
+.empty-state-panel-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.empty-state-panel-title {
+  color: var(--text-main);
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.empty-state-panel-desc {
+  font-size: 0.82rem;
+  max-width: 380px;
+  line-height: 1.5;
+}
+
+/* Markdown reader: renders the two demo guide documents in-app. A reading
+   column width, not the full app-container, since this is prose. */
+.markdown-reader {
+  max-width: 780px;
+  margin: 0 auto;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+.markdown-reader h1 {
+  font-size: 1.9rem;
+  margin: 0 0 8px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.markdown-reader h2 {
+  font-size: 1.35rem;
+  color: var(--text-main);
+  margin: 40px 0 14px;
+  padding-top: 8px;
+}
+
+.markdown-reader h3 {
+  font-size: 1.08rem;
+  color: var(--text-main);
+  margin: 26px 0 10px;
+}
+
+.markdown-reader p {
+  margin: 0 0 14px;
+}
+
+.markdown-reader ul,
+.markdown-reader ol {
+  margin: 0 0 14px;
+  padding-left: 22px;
+}
+
+.markdown-reader li {
+  margin-bottom: 6px;
+}
+
+.markdown-reader strong {
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+.markdown-reader code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: rgba(45, 212, 232, 0.1);
+  color: #7dd3e8;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.markdown-reader pre {
+  background: #090d16;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  overflow-x: auto;
+  margin: 0 0 18px;
+}
+
+.markdown-reader pre code {
+  background: none;
+  padding: 0;
+  color: #67e8f9;
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+
+.markdown-reader blockquote {
+  margin: 0 0 18px;
+  padding: 12px 18px;
+  border-left: 3px solid var(--primary);
+  background: var(--primary-light);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-main);
+}
+
+.markdown-reader blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-reader hr {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: 32px 0;
+}
+
+.markdown-reader a {
+  color: var(--accent-cyan);
+}
+
+.markdown-reader table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 20px;
+  font-size: 0.86rem;
+}
+
+.markdown-reader th {
+  text-align: left;
+  background: rgba(15, 23, 42, 0.7);
+  color: var(--text-muted);
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-medium);
+  white-space: nowrap;
+}
+
+.markdown-reader td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
 }
 
 /* Responsive Utilities */

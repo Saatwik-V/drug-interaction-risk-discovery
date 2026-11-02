@@ -68,8 +68,14 @@ function determineMaxSeverity(
 export async function orchestrateRiskAssessment(
   patientId: number,
   doctorUsername = 'dr_sharma',
-  notes = 'Automated polypharmacy multi-hop risk assessment'
+  notes = 'Automated polypharmacy multi-hop risk assessment',
+  maxHopDepth = 3
 ): Promise<RiskAssessmentResponse> {
+  // Clamp to the same domain enforced by the DB CHECK constraint
+  // (risk_assessments.max_hop_depth BETWEEN 1 AND 3) so the UI's slider and
+  // the persisted row can never disagree.
+  const requestedMaxHopDepth = [1, 2, 3].includes(maxHopDepth) ? maxHopDepth : 3;
+
   // 1. Validate patient existence
   const patient = await getPatientById(patientId);
   if (!patient) {
@@ -91,7 +97,7 @@ export async function orchestrateRiskAssessment(
         direct_interaction_count: 0,
         multi_hop_candidate_count: 0,
         max_severity_found: 'None',
-        max_hop_depth_searched: 1,
+        max_hop_depth_searched: requestedMaxHopDepth,
       },
       direct_findings: [],
       multi_hop_candidates: [],
@@ -100,16 +106,22 @@ export async function orchestrateRiskAssessment(
     };
   }
 
-  // 3. Query PostgreSQL for documented direct interactions
+  // 3. Query PostgreSQL for documented direct interactions (hop 1 — always run)
   const directFindings = await getDirectInteractionsForDrugs(drugIds);
 
-  // 4. Query Neo4j for candidate multi-hop pathways (2 to 3 hops)
+  // 4. Query Neo4j for candidate multi-hop pathways, strictly bounded to what
+  // the caller actually requested:
+  //   maxHopDepth = 1 -> direct findings only, Neo4j is not queried at all.
+  //   maxHopDepth = 2 -> 2-hop bridges only.
+  //   maxHopDepth = 3 -> 2-hop and 3-hop bridges.
   let multiHopCandidates: CandidatePathway[] = [];
-  try {
-    multiHopCandidates = await findCandidateMultiHopPathways(drugIds, 2, 3);
-  } catch (neoErr) {
-    console.error('Neo4j multi-hop exploration encountered an error:', neoErr);
-    // Graceful fallback: direct findings are still valid even if Neo4j is temporarily impaired
+  if (requestedMaxHopDepth >= 2) {
+    try {
+      multiHopCandidates = await findCandidateMultiHopPathways(drugIds, 2, requestedMaxHopDepth);
+    } catch (neoErr) {
+      console.error('Neo4j multi-hop exploration encountered an error:', neoErr);
+      // Graceful fallback: direct findings are still valid even if Neo4j is temporarily impaired
+    }
   }
 
   // 5. Prepare findings to persist in PostgreSQL
@@ -148,7 +160,7 @@ export async function orchestrateRiskAssessment(
     patientId,
     doctorUsername,
     drugIds.length,
-    3,
+    requestedMaxHopDepth,
     notes,
     findingsToInsert
   );
@@ -164,7 +176,7 @@ export async function orchestrateRiskAssessment(
       direct_interaction_count: directFindings.length,
       multi_hop_candidate_count: multiHopCandidates.length,
       max_severity_found: maxSeverity,
-      max_hop_depth_searched: 3,
+      max_hop_depth_searched: requestedMaxHopDepth,
     },
     direct_findings: directFindings,
     multi_hop_candidates: multiHopCandidates,

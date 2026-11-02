@@ -3,6 +3,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import StatusDot from '@/components/ui/StatusDot';
+import CommandPalette from '@/components/ui/CommandPalette';
 
 interface UserProfile {
   userId: number;
@@ -154,40 +156,58 @@ export default function Navbar() {
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 8,
-                      padding: '4px 8px',
+                      gap: 10,
+                      padding: '4px 10px',
                       borderRadius: 6,
                       background: 'rgba(0, 0, 0, 0.4)',
                       border: '1px solid rgba(255, 255, 255, 0.08)',
-                      fontSize: '0.72rem',
-                      fontFamily: 'monospace',
+                      fontFamily: 'var(--font-mono)',
                     }}
-                    title={`PostgreSQL (5432): ${health.services.postgres.latencyMs}ms | Neo4j (7687): ${health.services.neo4j.latencyMs}ms`}
                   >
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: '50%',
-                          background: health.services.postgres.status === 'healthy' ? '#10b981' : '#ef4444',
-                        }}
-                      />
-                      PG
-                    </span>
-                    <span style={{ color: 'rgba(255, 255, 255, 0.2)' }}>/</span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: '50%',
-                          background: health.services.neo4j.status === 'healthy' ? '#06b6d4' : '#ef4444',
-                        }}
-                      />
-                      NEO4J
-                    </span>
+                    <StatusDot
+                      status={health.services.postgres.status === 'healthy' ? 'healthy' : 'down'}
+                      label="PG"
+                      title={
+                        health.services.postgres.status === 'healthy'
+                          ? `PostgreSQL :5432 — ${health.services.postgres.latencyMs}ms`
+                          : 'PostgreSQL unreachable on :5432'
+                      }
+                    />
+                    <span style={{ color: 'rgba(255, 255, 255, 0.15)' }}>/</span>
+                    <StatusDot
+                      status={health.services.neo4j.status === 'healthy' ? 'healthy' : 'down'}
+                      label="NEO4J"
+                      title={
+                        health.services.neo4j.status === 'healthy'
+                          ? `Neo4j :7687 — ${health.services.neo4j.latencyMs}ms`
+                          : 'Neo4j unreachable on :7687'
+                      }
+                    />
                   </div>
+                )}
+
+                {/* Command Palette Trigger */}
+                {!loading && user && (
+                  <button
+                    onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '5px 10px',
+                      borderRadius: 6,
+                      background: 'rgba(255, 255, 255, 0.04)',
+                      border: '1px solid var(--border-subtle)',
+                      color: 'var(--text-muted)',
+                      fontSize: '0.75rem',
+                      fontFamily: 'var(--font-mono)',
+                      cursor: 'pointer',
+                    }}
+                    title="Jump to a patient, screen, or lab demo"
+                  >
+                    <span>Jump to…</span>
+                    <kbd style={{ fontFamily: 'var(--font-mono)' }}>⌘K</kbd>
+                  </button>
                 )}
 
                 {/* User Status */}
@@ -287,6 +307,23 @@ export default function Navbar() {
                         <span>🏛️</span> Architecture Trace
                       </Link>
 
+                      <Link
+                        href="/guides"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '8px 10px',
+                          borderRadius: 6,
+                          fontSize: '0.82rem',
+                          color: '#f8fafc',
+                          textDecoration: 'none',
+                          background: pathname === '/guides' ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
+                        }}
+                      >
+                        <span>📘</span> Viva Demo Guides
+                      </Link>
+
                       {user?.role === 'ADMIN' && (
                         <Link
                           href="/admin"
@@ -371,6 +408,7 @@ export default function Navbar() {
           )}
         </div>
       </div>
+      {!isLoginPage && user && <CommandPalette role={user.role} />}
     </nav>
   );
 }

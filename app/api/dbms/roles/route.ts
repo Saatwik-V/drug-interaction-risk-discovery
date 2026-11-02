@@ -17,9 +17,9 @@ export async function GET(request: NextRequest) {
         r.rolsuper,
         r.rolinherit,
         ARRAY(
-          SELECT b.rolname 
-          FROM pg_auth_members m 
-          JOIN pg_roles b ON m.roleid = b.oid 
+          SELECT b.rolname::text
+          FROM pg_auth_members m
+          JOIN pg_roles b ON m.roleid = b.oid
           WHERE m.member = r.oid
         ) AS member_of
       FROM pg_roles r

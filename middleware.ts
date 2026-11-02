@@ -59,9 +59,13 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Protect Admin UI pages
+  // Protect Admin UI pages. Carries the reason as a query param rather than
+  // a silent redirect, so the destination can explain what happened instead
+  // of the user just landing on the dashboard with no idea why.
   if (pathname.startsWith('/admin') && session.role !== 'ADMIN') {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
+    const dashboardUrl = new URL('/dashboard', request.url);
+    dashboardUrl.searchParams.set('forbidden', 'admin');
+    return NextResponse.redirect(dashboardUrl);
   }
 
   return NextResponse.next();

@@ -157,11 +157,22 @@ CREATE TABLE prescriptions (
     CONSTRAINT fk_prescription_drug FOREIGN KEY (drug_id) 
         REFERENCES drugs (drug_id) ON DELETE RESTRICT,
     CONSTRAINT ck_prescription_status CHECK (status IN ('ACTIVE', 'DISCONTINUED', 'COMPLETED')),
-    CONSTRAINT ck_prescription_date_range CHECK (end_date IS NULL OR end_date >= start_date),
-    CONSTRAINT uq_patient_drug_start UNIQUE (patient_id, drug_id, start_date)
+    CONSTRAINT ck_prescription_date_range CHECK (end_date IS NULL OR end_date >= start_date)
 );
 
 COMMENT ON TABLE prescriptions IS 'Transactional medication regimen orders prescribed to synthetic patients';
+
+-- A patient can't have two simultaneously ACTIVE orders for the same drug,
+-- but CAN be re-prescribed a drug they were previously taken off of (a
+-- routine clinical workflow) even on the same calendar day as the
+-- discontinuation. A plain UNIQUE(patient_id, drug_id, start_date) would
+-- wrongly block that: discontinuing then re-adding the same drug on the
+-- same day produces two rows with an identical (patient_id, drug_id,
+-- start_date) tuple and a false "duplicate" rejection. Scoping the
+-- uniqueness to ACTIVE rows only (a partial index) expresses the real
+-- invariant instead.
+CREATE UNIQUE INDEX uq_patient_drug_active ON prescriptions (patient_id, drug_id)
+    WHERE status = 'ACTIVE';
 
 -- ------------------------------------------------------------------------------
 -- 8. RISK ASSESSMENTS TABLE (SESSION HEADERS)
@@ -194,8 +205,13 @@ CREATE TABLE assessment_findings (
     hop_count INT NOT NULL,
     traversal_path TEXT NOT NULL,
     severity_level VARCHAR(20),
-    mechanism_category VARCHAR(100),
-    evidence_sources VARCHAR(100) NOT NULL,
+    -- TEXT, not VARCHAR(100): for a multi-hop candidate pathway this holds
+    -- several mechanism/source strings joined with '; ' (one per traversed
+    -- edge), which routinely exceeds 100 characters on real 3-hop paths
+    -- (e.g. aspirin -> warfarin -> amiodarone -> metoprolol hits 110 chars)
+    -- and errored with "value too long for type character varying(100)".
+    mechanism_category TEXT,
+    evidence_sources TEXT NOT NULL,
     finding_type VARCHAR(50) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_finding_assessment FOREIGN KEY (assessment_id) 

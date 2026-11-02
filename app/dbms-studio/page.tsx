@@ -1,13 +1,28 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import SqlCodeViewer from '@/components/ui/SqlCodeViewer';
+import VerifyOnDisk from '@/components/ui/VerifyOnDisk';
+import InteractionGraphViewer from '@/components/graph/InteractionGraphViewer';
 import { useToast } from '@/components/ui/Toast';
+
+function generateDemoUsername(): string {
+  const suffix = Math.floor(1000 + Math.random() * 9000);
+  return `dr_kapoor_${suffix}`;
+}
+
+function severityBadgeClassForGraph(severity: string | undefined): string {
+  const s = severity?.toLowerCase();
+  if (s === 'major' || s === 'critical') return 'badge-major';
+  if (s === 'moderate') return 'badge-moderate';
+  if (s === 'minor') return 'badge-minor';
+  return 'badge-unknown';
+}
 
 export default function DbmsStudioPage() {
   const { addToast } = useToast();
   const [activeTab, setActiveTab] = useState<
-    'constraints' | 'triggers' | 'procedures' | 'queries' | 'ddl' | 'roles'
+    'constraints' | 'triggers' | 'procedures' | 'queries' | 'ddl' | 'roles' | 'graph'
   >('constraints');
 
   // Tab 1: Constraints Lab State
@@ -21,6 +36,26 @@ export default function DbmsStudioPage() {
   const [cascadeCounts, setCascadeCounts] = useState<any | null>(null);
   const [cascadeLoading, setCascadeLoading] = useState(false);
   const [cascadeResult, setCascadeResult] = useState<any | null>(null);
+  const ephemeralPatientRef = useRef<any | null>(null);
+  useEffect(() => {
+    ephemeralPatientRef.current = ephemeralPatient;
+  }, [ephemeralPatient]);
+
+  // Best-effort self-clean: if the examiner navigates away or closes the tab
+  // while an ephemeral sandbox patient is still pending deletion, sweep it on
+  // the way out so the next session always starts clean.
+  useEffect(() => {
+    const sweepOnExit = () => {
+      if (ephemeralPatientRef.current) {
+        fetch('/api/dbms/constraints/test-cascade', { method: 'DELETE', keepalive: true }).catch(() => {});
+      }
+    };
+    window.addEventListener('beforeunload', sweepOnExit);
+    return () => {
+      sweepOnExit();
+      window.removeEventListener('beforeunload', sweepOnExit);
+    };
+  }, []);
 
   // Check Constraint State
   const [checkResult, setCheckResult] = useState<any | null>(null);
@@ -53,7 +88,7 @@ export default function DbmsStudioPage() {
   // Tab 6: DCL, Roles & RBAC State
   const [engineRoles, setEngineRoles] = useState<any[]>([]);
   const [appProfiles, setAppProfiles] = useState<any[]>([]);
-  const [newUsername, setNewUsername] = useState('dr_kapoor');
+  const [newUsername, setNewUsername] = useState(generateDemoUsername);
   const [newFullName, setNewFullName] = useState('Dr. Anita Kapoor, MD');
   const [newPassword, setNewPassword] = useState('DoctorPass#2026');
   const [newRole, setNewRole] = useState<'DOCTOR' | 'ADMIN'>('DOCTOR');
@@ -61,6 +96,27 @@ export default function DbmsStudioPage() {
   const [dclLoading, setDclLoading] = useState(false);
   const [rbacTestResult, setRbacTestResult] = useState<any | null>(null);
   const [rbacLoading, setRbacLoading] = useState(false);
+
+  // Tab 7: NoSQL Graph RUD State
+  const [allDrugs, setAllDrugs] = useState<any[]>([]);
+  const [starNetworkDrug, setStarNetworkDrug] = useState('warfarin');
+  const [starNetwork, setStarNetwork] = useState<any | null>(null);
+  const [starNetworkLoading, setStarNetworkLoading] = useState(false);
+  // Deliberately NOT a real seeded pair (e.g. warfarin/aspirin, pair_id 1001)
+  // — this form's Delete button runs for real against Neo4j, and defaulting
+  // to a documented demo edge meant an examiner (or anyone) clicking through
+  // the form without changing the dropdowns would destroy real seed data.
+  // metoprolol/ibuprofen has no existing edge, so Create/Update/Delete here
+  // is always a self-contained sandbox action.
+  const [edgeDrugA, setEdgeDrugA] = useState('metoprolol');
+  const [edgeDrugB, setEdgeDrugB] = useState('ibuprofen');
+  const [edgeSeverity, setEdgeSeverity] = useState('Moderate');
+  const [edgeMechanism, setEdgeMechanism] = useState('Test interaction (DBMS Studio demo)');
+  const [graphMutationResult, setGraphMutationResult] = useState<any | null>(null);
+  const [graphMutationLoading, setGraphMutationLoading] = useState(false);
+  const [graphOverview, setGraphOverview] = useState<any | null>(null);
+  const [graphOverviewLoading, setGraphOverviewLoading] = useState(false);
+  const [showFullGraph, setShowFullGraph] = useState(false);
 
   // Initial Load for Active Tab
   useEffect(() => {
@@ -75,8 +131,36 @@ export default function DbmsStudioPage() {
             }
           }
         });
+
+      // Self-heal: sweep any ephemeral sandbox patients left behind by a
+      // previous demo session (crash, forgotten cleanup click, etc.) so the
+      // Constraints Lab always opens in a pristine, reproducible state.
+      setEphemeralPatient(null);
+      setCascadeResult(null);
+      fetch('/api/dbms/constraints/test-cascade')
+        .then((r) => r.json())
+        .then((listData) => {
+          if (listData.success && listData.ephemeralPatients?.length > 0) {
+            return fetch('/api/dbms/constraints/test-cascade', { method: 'DELETE' })
+              .then((r) => r.json())
+              .then((sweepData) => {
+                if (sweepData.success && sweepData.sweptCount > 0) {
+                  addToast({
+                    type: 'info',
+                    title: 'Sandbox Auto-Cleaned',
+                    message: sweepData.summary,
+                  });
+                }
+                setCascadeCounts({ patients: 0, prescriptions: 0, risk_assessments: 0, assessment_findings: 0 });
+              });
+          }
+          setCascadeCounts({ patients: 0, prescriptions: 0, risk_assessments: 0, assessment_findings: 0 });
+        });
     } else if (activeTab === 'triggers') {
-      fetch('/api/dbms/triggers/demo')
+      // Always start the Triggers tab from a fresh, isolated demo session
+      // (counters at 0/0) so no manual DB reseed is ever required between runs.
+      setTriggerResult(null);
+      fetch('/api/dbms/triggers/demo?reset=true')
         .then((r) => r.json())
         .then((d) => {
           if (d.success) setTriggerHeader(d.assessment);
@@ -95,6 +179,16 @@ export default function DbmsStudioPage() {
         });
     } else if (activeTab === 'roles') {
       loadRolesData();
+    } else if (activeTab === 'graph') {
+      if (allDrugs.length === 0) {
+        fetch('/api/prescriptions')
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success) setAllDrugs(d.data);
+          });
+      }
+      loadStarNetwork(starNetworkDrug);
+      loadGraphOverview();
     }
   }, [activeTab]);
 
@@ -110,6 +204,87 @@ export default function DbmsStudioPage() {
         .finally(() => setSchemaLoading(false));
     }
   }, [activeTab, selectedTable]);
+
+  const loadGraphOverview = async () => {
+    setGraphOverviewLoading(true);
+    try {
+      const res = await fetch('/api/neo4j/graph-rud?action=overview');
+      const data = await res.json();
+      if (data.success) setGraphOverview(data.overview);
+    } finally {
+      setGraphOverviewLoading(false);
+    }
+  };
+
+  const loadStarNetwork = async (drugName: string) => {
+    setStarNetworkLoading(true);
+    try {
+      const res = await fetch(`/api/neo4j/graph-rud?drug=${encodeURIComponent(drugName)}`);
+      const data = await res.json();
+      setStarNetwork(data.success ? data.starNetwork : null);
+    } finally {
+      setStarNetworkLoading(false);
+    }
+  };
+
+  const handleCreateGraphEdge = async () => {
+    setGraphMutationLoading(true);
+    setGraphMutationResult(null);
+    try {
+      const res = await fetch('/api/neo4j/graph-rud', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ drugA: edgeDrugA, drugB: edgeDrugB, severity: edgeSeverity, mechanism: edgeMechanism }),
+      });
+      const data = await res.json();
+      setGraphMutationResult({ op: 'CREATE', ...data });
+      if (data.success) {
+        addToast({ type: 'success', title: 'Neo4j Edge Created (MERGE)', message: data.message });
+        loadStarNetwork(starNetworkDrug);
+      }
+    } finally {
+      setGraphMutationLoading(false);
+    }
+  };
+
+  const handleUpdateGraphEdge = async () => {
+    setGraphMutationLoading(true);
+    setGraphMutationResult(null);
+    try {
+      const res = await fetch('/api/neo4j/graph-rud', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ drugA: edgeDrugA, drugB: edgeDrugB, severity: edgeSeverity, mechanism: edgeMechanism }),
+      });
+      const data = await res.json();
+      setGraphMutationResult({ op: 'UPDATE', ...data });
+      if (data.success) {
+        addToast({ type: 'success', title: 'Neo4j Edge Updated (SET)', message: data.message });
+        loadStarNetwork(starNetworkDrug);
+      }
+    } finally {
+      setGraphMutationLoading(false);
+    }
+  };
+
+  const handleDeleteGraphEdge = async () => {
+    setGraphMutationLoading(true);
+    setGraphMutationResult(null);
+    try {
+      const res = await fetch(
+        `/api/neo4j/graph-rud?drug_a=${encodeURIComponent(edgeDrugA)}&drug_b=${encodeURIComponent(edgeDrugB)}`,
+        { method: 'DELETE' }
+      );
+      const data = await res.json();
+      setGraphMutationResult({ op: 'DELETE', ...data });
+      if (data.success) {
+        addToast({ type: 'info', title: 'Neo4j Edge Deleted', message: data.message });
+        loadStarNetwork(starNetworkDrug);
+      }
+    } finally {
+      setGraphMutationLoading(false);
+    }
+  };
 
   const loadRolesData = () => {
     fetch('/api/dbms/roles')
@@ -237,6 +412,25 @@ export default function DbmsStudioPage() {
     }
   };
 
+  const handleResetTriggerDemo = async () => {
+    setTriggerLoading(true);
+    setTriggerResult(null);
+    try {
+      const res = await fetch('/api/dbms/triggers/demo', { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        setTriggerHeader(data.assessment);
+        addToast({
+          type: 'info',
+          title: 'Demo Session Reset',
+          message: 'Sandbox assessment purged and recreated with counters at 0/0 — fully reproducible for the next run.',
+        });
+      }
+    } finally {
+      setTriggerLoading(false);
+    }
+  };
+
   const handleExecuteProcedure = async () => {
     setProcedureLoading(true);
     setProcedureResult(null);
@@ -307,12 +501,38 @@ export default function DbmsStudioPage() {
           message: data.message,
         });
         loadRolesData();
+        // Regenerate a fresh default username so the form can be re-submitted
+        // immediately without a collision — no manual cleanup required.
+        setNewUsername(generateDemoUsername());
       } else {
         addToast({
           type: 'error',
           title: 'User Creation Error',
           message: data.error,
         });
+      }
+    } finally {
+      setDclLoading(false);
+    }
+  };
+
+  const handleDeleteDemoUser = async (username: string) => {
+    setDclLoading(true);
+    try {
+      const res = await fetch(`/api/admin/users?username=${encodeURIComponent(username)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        addToast({
+          type: 'success',
+          title: 'Demo Account Self-Cleaned',
+          message: data.message,
+        });
+        setDclResult(null);
+        loadRolesData();
+      } else {
+        addToast({ type: 'error', title: 'Cleanup Failed', message: data.error });
       }
     } finally {
       setDclLoading(false);
@@ -340,38 +560,34 @@ export default function DbmsStudioPage() {
   return (
     <div className="app-container">
       {/* Header Banner */}
-      <div
-        className="card"
-        style={{
-          marginBottom: 24,
-          background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.9) 100%)',
-          border: '1px solid rgba(99, 102, 241, 0.3)',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="hero-banner" style={{ marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 20 }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <span
                 style={{
-                  background: 'rgba(99, 102, 241, 0.2)',
-                  color: '#818cf8',
+                  background: 'rgba(124, 108, 245, 0.18)',
+                  color: '#a79af7',
                   padding: '4px 10px',
                   borderRadius: 6,
                   fontWeight: 700,
-                  fontSize: '0.85rem',
+                  fontSize: '0.78rem',
+                  letterSpacing: '0.02em',
                 }}
               >
-                PES UNIVERSITY LEVEL 3 (50 MARKS)
+                PES University · DBMS Level 3 · 50 marks
               </span>
-              <span style={{ color: '#10b981', fontSize: '0.85rem', fontWeight: 600 }}>
-                ● 100% Live Database Ground Truth
+              <span className="status-dot">
+                <span className="status-dot-indicator healthy pulse" />
+                100% live database ground truth
               </span>
             </div>
-            <h1 style={{ fontSize: '1.85rem', fontWeight: 800, color: '#f8fafc', marginTop: 10 }}>
+            <h1 className="hero-title" style={{ marginTop: 10 }}>
               DBMS Operations &amp; Evaluation Studio
             </h1>
-            <p style={{ color: '#94a3b8', fontSize: '0.95rem', marginTop: 4 }}>
-              Demonstrate every evaluated relational DBMS rubric capability live from the application interface.
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', marginTop: 6, maxWidth: 560 }}>
+              Every evaluated relational and graph-database capability, triggerable live from this interface —
+              the same actions are also reachable from the regular clinical screens, not just here.
             </p>
           </div>
           <div
@@ -383,8 +599,8 @@ export default function DbmsStudioPage() {
               border: '1px solid rgba(255, 255, 255, 0.08)',
             }}
           >
-            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>PostgreSQL Port / Neo4j Bolt</div>
-            <div style={{ fontSize: '0.95rem', fontFamily: 'monospace', color: '#38bdf8', fontWeight: 600 }}>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>PostgreSQL port / Neo4j Bolt</div>
+            <div style={{ fontSize: '0.95rem', fontFamily: 'var(--font-mono)', color: '#2dd4e8', fontWeight: 600 }}>
               localhost:5432 / :7687
             </div>
           </div>
@@ -395,7 +611,7 @@ export default function DbmsStudioPage() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(6, 1fr)',
+          gridTemplateColumns: 'repeat(7, 1fr)',
           gap: 8,
           marginBottom: 24,
         }}
@@ -407,6 +623,7 @@ export default function DbmsStudioPage() {
           { key: 'queries', label: '4. Advanced SQL & CTEs', badge: '7 Rubric Queries' },
           { key: 'ddl', label: '5. DDL & Schema Studio', badge: 'Show Create Table' },
           { key: 'roles', label: '6. DCL & Roles (CREATE USER)', badge: 'Two-Tier RBAC' },
+          { key: 'graph', label: '7. NoSQL Graph RUD', badge: 'Neo4j CRUD' },
         ].map((tab) => {
           const isActive = activeTab === tab.key;
           return (
@@ -538,18 +755,18 @@ export default function DbmsStudioPage() {
                         <span style={{ color: '#38bdf8' }}>⚡ {restrictResult.executionMs}ms</span>
                       </div>
                     </div>
-                    <div
-                      style={{
-                        marginTop: 14,
-                        padding: 10,
-                        borderRadius: 6,
-                        background: 'rgba(0, 0, 0, 0.4)',
-                        fontSize: '0.78rem',
-                        color: '#94a3b8',
+                    <VerifyOnDisk
+                      query={`SELECT drug_id, canonical_name FROM drugs WHERE drug_id = ${restrictDrugId};`}
+                      expected={`Row still present — the DELETE was rejected, so drug_id ${restrictDrugId} was never removed.`}
+                      onReRead={async () => {
+                        const res = await fetch('/api/dbms/constraints/test-restrict');
+                        const data = await res.json();
+                        const row = data.referencedDrugs?.find((d: any) => d.drug_id === restrictDrugId);
+                        return row
+                          ? `Row intact: drug_id=${row.drug_id}, canonical_name=${row.canonical_name}`
+                          : 'Row not found in the referenced-drugs list (unexpected).';
                       }}
-                    >
-                      Dual-Verification in pgAdmin: <code>SELECT * FROM drugs WHERE drug_id = {restrictDrugId};</code> confirms the row remains intact!
-                    </div>
+                    />
                   </div>
                 ) : (
                   <div
@@ -694,6 +911,18 @@ ALTER TABLE assessment_findings ADD CONSTRAINT fk_finding_assessment
                       ✨ {cascadeResult.summary} (Executed in {cascadeResult.executionMs}ms)
                     </div>
                   )}
+
+                  {cascadeResult && (
+                    <VerifyOnDisk
+                      query={`SELECT count(*) FROM prescriptions WHERE patient_id = ${cascadeResult.patientId};\nSELECT count(*) FROM risk_assessments WHERE patient_id = ${cascadeResult.patientId};`}
+                      expected={`All child row counts return 0 — patient #${cascadeResult.patientId} and its 3 dependent tables were purged atomically.`}
+                      onReRead={async () => {
+                        const res = await fetch(`/api/dbms/constraints/test-cascade?patient_id=${cascadeResult.patientId}`);
+                        const data = await res.json();
+                        return `patients=${data.counts.patients}, prescriptions=${data.counts.prescriptions}, risk_assessments=${data.counts.risk_assessments}, assessment_findings=${data.counts.assessment_findings}`;
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -711,12 +940,12 @@ ALTER TABLE assessment_findings ADD CONSTRAINT fk_finding_assessment
               PostgreSQL enforces domain rules at the schema level before rows are accepted into storage.
             </p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginTop: 18 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 14, marginTop: 18 }}>
               <button
                 onClick={() => handleTestCheck('PATIENT_SYNTHETIC')}
                 disabled={checkLoading}
                 className="btn btn-secondary"
-                style={{ textAlign: 'left', padding: '14px' }}
+                style={{ textAlign: 'left', padding: '14px', whiteSpace: 'normal', minWidth: 0, height: 'auto' }}
               >
                 <div style={{ fontWeight: 700, color: '#f8fafc' }}>Test 1: Synthetic Patient Guard</div>
                 <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>
@@ -731,7 +960,7 @@ ALTER TABLE assessment_findings ADD CONSTRAINT fk_finding_assessment
                 onClick={() => handleTestCheck('HOP_DEPTH')}
                 disabled={checkLoading}
                 className="btn btn-secondary"
-                style={{ textAlign: 'left', padding: '14px' }}
+                style={{ textAlign: 'left', padding: '14px', whiteSpace: 'normal', minWidth: 0, height: 'auto' }}
               >
                 <div style={{ fontWeight: 700, color: '#f8fafc' }}>Test 2: Hop Depth Bound</div>
                 <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>
@@ -746,7 +975,7 @@ ALTER TABLE assessment_findings ADD CONSTRAINT fk_finding_assessment
                 onClick={() => handleTestCheck('PAIR_ORDER')}
                 disabled={checkLoading}
                 className="btn btn-secondary"
-                style={{ textAlign: 'left', padding: '14px' }}
+                style={{ textAlign: 'left', padding: '14px', whiteSpace: 'normal', minWidth: 0, height: 'auto' }}
               >
                 <div style={{ fontWeight: 700, color: '#f8fafc' }}>Test 3: Canonical Pair Order</div>
                 <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>
@@ -805,8 +1034,27 @@ ALTER TABLE assessment_findings ADD CONSTRAINT fk_finding_assessment
                   border: '1px solid rgba(255, 255, 255, 0.08)',
                 }}
               >
-                <div style={{ fontSize: '0.82rem', color: '#94a3b8', marginBottom: 8 }}>
-                  Active Assessment Header ID: #{triggerHeader?.assessment_id ?? 'Loading...'}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontSize: '0.82rem', color: '#94a3b8' }}>
+                    Isolated Sandbox Assessment ID: #{triggerHeader?.assessment_id ?? 'Loading...'}
+                  </div>
+                  <button
+                    onClick={handleResetTriggerDemo}
+                    disabled={triggerLoading}
+                    className="btn"
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.06)',
+                      color: '#94a3b8',
+                      fontSize: '0.72rem',
+                      padding: '4px 10px',
+                    }}
+                    title="Purge this sandbox assessment and start fresh at 0/0"
+                  >
+                    🔄 Reset Demo Session
+                  </button>
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#64748b', marginBottom: 8 }}>
+                  This session is isolated via <code>assessment_notes</code> and never touches real clinical assessments.
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -887,6 +1135,18 @@ ALTER TABLE assessment_findings ADD CONSTRAINT fk_finding_assessment
                     Function: {triggerResult.functionExecuted} (Executed in {triggerResult.executionMs}ms)
                   </div>
                 </div>
+              )}
+
+              {triggerHeader && (
+                <VerifyOnDisk
+                  query={`SELECT assessment_id, direct_interaction_count, multi_hop_candidate_count\nFROM risk_assessments WHERE assessment_id = ${triggerHeader.assessment_id};`}
+                  expected={`direct_interaction_count=${triggerHeader.direct_interaction_count}, multi_hop_candidate_count=${triggerHeader.multi_hop_candidate_count} on the live row — exactly what the trigger wrote, nothing computed here.`}
+                  onReRead={async () => {
+                    const res = await fetch('/api/dbms/triggers/demo');
+                    const data = await res.json();
+                    return `assessment_id=${data.assessment.assessment_id}, direct_interaction_count=${data.assessment.direct_interaction_count}, multi_hop_candidate_count=${data.assessment.multi_hop_candidate_count}`;
+                  }}
+                />
               )}
             </div>
 
@@ -1375,6 +1635,35 @@ FOR EACH ROW EXECUTE FUNCTION fn_update_assessment_counts();`}
                   code={dclResult.dclExecuted.join('\n')}
                   language="sql"
                 />
+                <VerifyOnDisk
+                  query={`SELECT usename, usecreatedb FROM pg_user WHERE usename = '${dclResult.data.username}';`}
+                  expected={`One row: usename=${dclResult.data.username} — proves CREATE USER actually ran, not just the user_accounts insert.`}
+                  onReRead={async () => {
+                    const res = await fetch('/api/dbms/roles');
+                    const data = await res.json();
+                    const row = data.tier2PostgresEngineRoles?.find((r: any) => r.rolname === dclResult.data.username);
+                    return row
+                      ? `Found in pg_roles: rolname=${row.rolname}, member_of=${row.member_of.join(', ') || 'none'}`
+                      : 'Not found in pg_roles (DCL may have failed).';
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleDeleteDemoUser(dclResult.data.username)}
+                  disabled={dclLoading}
+                  className="btn"
+                  style={{
+                    marginTop: 10,
+                    background: 'rgba(239, 68, 68, 0.12)',
+                    color: '#fca5a5',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    fontSize: '0.78rem',
+                    width: '100%',
+                  }}
+                  title="Reverses this demo: DROP USER + delete application profile row"
+                >
+                  🗑️ Remove Demo Account &amp; Self-Clean (DROP USER {dclResult.data.username})
+                </button>
               </div>
             )}
 
@@ -1470,6 +1759,306 @@ FOR EACH ROW EXECUTE FUNCTION fn_update_assessment_counts();`}
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ====================================================================== */}
+      {/* MODULE 7: NOSQL GRAPH RUD (NEO4J) */}
+      {/* ====================================================================== */}
+      {activeTab === 'graph' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          {/* Graph-wide schema & verification: SHOW CONSTRAINTS, counts, centrality */}
+          <div className="card">
+            <span className="badge" style={{ background: '#0ea5e9', color: '#f8fafc', marginBottom: 8, display: 'inline-block' }}>
+              RUBRIC DEMO: NOSQL/GRAPH DATABASE CREATION &amp; SCHEMA
+            </span>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#f8fafc' }}>
+              Graph-Wide Schema, Uniqueness Constraints &amp; Centrality
+            </h2>
+            <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: 4 }}>
+              Everything an examiner would otherwise check in Neo4j Browser with <code>SHOW CONSTRAINTS</code> and node/edge counts, read live from this app.
+            </p>
+
+            {graphOverviewLoading ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 16 }}>Querying Neo4j…</div>
+            ) : graphOverview ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 18 }}>
+                <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+                    <div style={{ padding: 14, borderRadius: 8, background: 'rgba(14, 165, 233, 0.08)', border: '1px solid rgba(14, 165, 233, 0.25)', textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#38bdf8' }}>{graphOverview.nodeCount}</div>
+                      <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>:Drug nodes</div>
+                    </div>
+                    <div style={{ padding: 14, borderRadius: 8, background: 'rgba(14, 165, 233, 0.08)', border: '1px solid rgba(14, 165, 233, 0.25)', textAlign: 'center' }}>
+                      <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#38bdf8' }}>{graphOverview.edgeCount}</div>
+                      <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>INTERACTS_WITH edges</div>
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#f8fafc', marginBottom: 8 }}>
+                    Uniqueness Constraints (SHOW CONSTRAINTS)
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {graphOverview.constraints.map((c: any) => (
+                      <div
+                        key={c.name}
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: 6,
+                          background: 'rgba(255, 255, 255, 0.03)',
+                          border: '1px solid var(--border-subtle)',
+                          fontSize: '0.78rem',
+                          fontFamily: 'var(--font-mono)',
+                          color: '#a5f3fc',
+                        }}
+                      >
+                        {c.name}: {c.type} ON ({c.labelsOrTypes.join(', ')}) {c.properties.join(', ')}
+                      </div>
+                    ))}
+                  </div>
+
+                  <VerifyOnDisk
+                    query={'SHOW CONSTRAINTS;'}
+                    language="cypher"
+                    expected={`${graphOverview.constraints.length} uniqueness constraints on :Drug, status ONLINE.`}
+                    onReRead={async () => {
+                      const res = await fetch('/api/neo4j/graph-rud?action=overview');
+                      const data = await res.json();
+                      return `${data.overview.constraints.length} constraints, ${data.overview.nodeCount} nodes, ${data.overview.edgeCount} edges`;
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#f8fafc', marginBottom: 8 }}>
+                    Degree Centrality (Most-Connected Drugs)
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
+                    {graphOverview.centrality.map((c: any, i: number) => (
+                      <div
+                        key={c.drug}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '8px 12px',
+                          borderRadius: 6,
+                          background: 'rgba(255, 255, 255, 0.03)',
+                          border: '1px solid var(--border-subtle)',
+                          fontSize: '0.82rem',
+                        }}
+                      >
+                        <span style={{ fontFamily: 'var(--font-mono)' }}>#{i + 1} {c.drug}</span>
+                        <span className="badge" style={{ background: 'rgba(14, 165, 233, 0.15)', color: '#38bdf8', fontSize: '0.7rem' }}>
+                          degree {c.degreeCentrality}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <SqlCodeViewer
+                    title="Degree Centrality Cypher"
+                    language="cypher"
+                    code={`MATCH (d:Drug)-[r:INTERACTS_WITH]-()\nRETURN d.canonical_name AS drug, count(r) AS degree_centrality\nORDER BY degree_centrality DESC\nLIMIT 5;`}
+                  />
+
+                  <button
+                    onClick={() => setShowFullGraph((v) => !v)}
+                    className="btn btn-secondary"
+                    style={{ width: '100%', marginTop: 12 }}
+                  >
+                    {showFullGraph ? 'Hide Full Interaction Graph' : 'View Full Interaction Graph (All 10 Drugs)'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 16 }}>No graph data available.</div>
+            )}
+
+            {showFullGraph && graphOverview && (
+              <div style={{ marginTop: 16 }}>
+                <InteractionGraphViewer
+                  nodes={graphOverview.nodes.map((n: any) => ({ id: n.id, name: n.name, type: 'Prescribed' as const }))}
+                  links={graphOverview.edges.map((e: any) => ({
+                    source: e.source,
+                    target: e.target,
+                    severity: e.severity,
+                    mechanism: e.mechanism,
+                  }))}
+                  width={1200}
+                  height={420}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <span className="badge" style={{ background: '#0ea5e9', color: '#f8fafc', marginBottom: 8, display: 'inline-block' }}>
+              RUBRIC DEMO: NOSQL CREATE / READ / UPDATE / DELETE
+            </span>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#f8fafc' }}>
+              Full CRUD on the Neo4j Property Graph
+            </h2>
+            <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: 4 }}>
+              Every action here executes real Cypher against the running Neo4j instance — no in-memory mock. Create/Update/Delete require ADMIN.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 18 }}>
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.78rem', color: '#94a3b8', marginBottom: 6 }}>Drug A</label>
+                    <select className="input-field" value={edgeDrugA} onChange={(e) => setEdgeDrugA(e.target.value)}>
+                      {allDrugs.map((d) => (
+                        <option key={d.drug_id} value={d.canonical_name}>{d.canonical_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.78rem', color: '#94a3b8', marginBottom: 6 }}>Drug B</label>
+                    <select className="input-field" value={edgeDrugB} onChange={(e) => setEdgeDrugB(e.target.value)}>
+                      {allDrugs.map((d) => (
+                        <option key={d.drug_id} value={d.canonical_name}>{d.canonical_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10, marginBottom: 14 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.78rem', color: '#94a3b8', marginBottom: 6 }}>Severity</label>
+                    <select className="input-field" value={edgeSeverity} onChange={(e) => setEdgeSeverity(e.target.value)}>
+                      {['Major', 'Moderate', 'Minor', 'Unknown'].map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.78rem', color: '#94a3b8', marginBottom: 6 }}>Mechanism</label>
+                    <input
+                      className="input-field"
+                      value={edgeMechanism}
+                      onChange={(e) => setEdgeMechanism(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={handleCreateGraphEdge} disabled={graphMutationLoading} className="btn btn-primary" style={{ flex: 1 }}>
+                    Create (MERGE)
+                  </button>
+                  <button onClick={handleUpdateGraphEdge} disabled={graphMutationLoading} className="btn btn-secondary" style={{ flex: 1 }}>
+                    Update (SET)
+                  </button>
+                  <button
+                    onClick={handleDeleteGraphEdge}
+                    disabled={graphMutationLoading}
+                    className="btn"
+                    style={{ flex: 1, background: 'rgba(239, 68, 68, 0.15)', color: '#fb7185', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+                  >
+                    Delete
+                  </button>
+                </div>
+
+                {graphMutationResult && (
+                  <div
+                    style={{
+                      marginTop: 14,
+                      padding: 12,
+                      borderRadius: 8,
+                      background: graphMutationResult.success ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                      border: `1px solid ${graphMutationResult.success ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                      fontSize: '0.82rem',
+                      color: graphMutationResult.success ? '#6ee7b7' : '#fca5a5',
+                    }}
+                  >
+                    [{graphMutationResult.op}] {graphMutationResult.message || graphMutationResult.error}
+                    {graphMutationResult.executionMs !== undefined && ` (${graphMutationResult.executionMs}ms)`}
+                  </div>
+                )}
+
+                <VerifyOnDisk
+                  query={`MATCH (a:Drug {canonical_name: '${edgeDrugA}'})-[r:INTERACTS_WITH]-(b:Drug {canonical_name: '${edgeDrugB}'})\nRETURN a.canonical_name, r.severity_level, r.mechanism_categories, b.canonical_name;`}
+                  language="cypher"
+                  expected="The edge's current severity_level and mechanism_categories properties, matching whatever this panel last wrote."
+                  onReRead={async () => {
+                    const res = await fetch(`/api/neo4j/graph-rud?drug=${encodeURIComponent(edgeDrugA)}`);
+                    const data = await res.json();
+                    const edge = data.starNetwork?.edges?.find(
+                      (e: any) =>
+                        (e.source === edgeDrugA && e.target === edgeDrugB) ||
+                        (e.source === edgeDrugB && e.target === edgeDrugA)
+                    );
+                    return edge
+                      ? `severity=${edge.severity}, mechanism=${edge.mechanism}`
+                      : 'No edge found between these two drugs.';
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.78rem', color: '#94a3b8', marginBottom: 6 }}>
+                  Read: 1-hop ego-network for
+                </label>
+                <select
+                  className="input-field"
+                  value={starNetworkDrug}
+                  onChange={(e) => {
+                    setStarNetworkDrug(e.target.value);
+                    loadStarNetwork(e.target.value);
+                  }}
+                  style={{ marginBottom: 12 }}
+                >
+                  {allDrugs.map((d) => (
+                    <option key={d.drug_id} value={d.canonical_name}>{d.canonical_name}</option>
+                  ))}
+                </select>
+
+                {starNetworkLoading ? (
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Querying Neo4j…</div>
+                ) : starNetwork ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ fontWeight: 700, color: '#f8fafc' }}>{starNetwork.center.name}</div>
+                    {starNetwork.edges.length === 0 ? (
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>No edges in the graph for this drug yet.</div>
+                    ) : (
+                      starNetwork.edges.map((e: any, i: number) => (
+                        <div
+                          key={i}
+                          style={{
+                            padding: '8px 12px',
+                            borderRadius: 6,
+                            background: 'rgba(14, 165, 233, 0.08)',
+                            border: '1px solid rgba(14, 165, 233, 0.25)',
+                            fontSize: '0.82rem',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                          }}
+                        >
+                          <span style={{ fontFamily: 'var(--font-mono)' }}>
+                            {e.source} &harr; {e.target}
+                          </span>
+                          <span className={`badge ${severityBadgeClassForGraph(e.severity)}`} style={{ fontSize: '0.68rem' }}>
+                            {e.severity || 'Unknown'}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No graph data found for this drug.</div>
+                )}
+
+                <div style={{ marginTop: 14 }}>
+                  <SqlCodeViewer
+                    title="Read: Cypher Ego-Network Query"
+                    code={`MATCH (d:Drug {canonical_name: '${starNetworkDrug}'})\nOPTIONAL MATCH (d)-[r:INTERACTS_WITH]-(other:Drug)\nRETURN d, collect({ rel: r, neighbor: other }) AS connections;`}
+                    language="cypher"
+                  />
+                </div>
               </div>
             </div>
           </div>

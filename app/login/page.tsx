@@ -2,6 +2,7 @@
 
 import React, { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import NetworkCanvas from '@/components/ui/NetworkCanvas';
 
 function LoginFormContent() {
   const router = useRouter();
@@ -49,35 +50,61 @@ function LoginFormContent() {
   };
 
   return (
-    <div className="app-container" style={{ maxWidth: 480, marginTop: 40 }}>
-      <div className="card" style={{ padding: '36px 32px' }}>
-        <div style={{ textAlign: 'center', marginBottom: 28 }}>
-          <div
-            className="brand-icon"
-            style={{ width: 48, height: 48, margin: '0 auto 16px', fontSize: '1.25rem' }}
-          >
-            Rx
-          </div>
-          <h1>System Authentication</h1>
-          <p style={{ marginTop: 6, fontSize: '0.875rem' }}>
-            Dual-Database Polypharmacy Risk Discovery Platform
-          </p>
-          <div
+    <div
+      style={{
+        position: 'relative',
+        minHeight: 'calc(100vh - 150px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+      }}
+    >
+      <NetworkCanvas />
+
+      <div className="app-container" style={{ maxWidth: 480, position: 'relative', zIndex: 1 }}>
+        <div style={{ textAlign: 'center', marginBottom: 22 }}>
+          <p
             style={{
-              marginTop: 10,
-              display: 'inline-flex',
-              padding: '2px 10px',
-              borderRadius: 9999,
-              background: 'rgba(99, 102, 241, 0.1)',
-              border: '1px solid rgba(99, 102, 241, 0.25)',
-              fontSize: '0.75rem',
-              color: '#818cf8',
-              fontWeight: 600,
+              fontSize: '0.74rem',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              color: 'var(--text-muted)',
             }}
           >
-            PES University • DBMS Level 3
-          </div>
+            documented interaction — candidate pathway
+          </p>
         </div>
+
+        <div className="card" style={{ padding: '36px 32px' }}>
+          <div style={{ textAlign: 'center', marginBottom: 28 }}>
+            <div
+              className="brand-icon"
+              style={{ width: 48, height: 48, margin: '0 auto 16px', fontSize: '1.25rem' }}
+            >
+              Rx
+            </div>
+            <h1>Sign in to RxGraph</h1>
+            <p style={{ marginTop: 6, fontSize: '0.875rem' }}>
+              Where a relational ledger and a graph meet to find the drug interaction
+              neither one sees alone.
+            </p>
+            <div
+              style={{
+                marginTop: 10,
+                display: 'inline-flex',
+                padding: '2px 10px',
+                borderRadius: 9999,
+                background: 'rgba(124, 108, 245, 0.12)',
+                border: '1px solid rgba(124, 108, 245, 0.28)',
+                fontSize: '0.75rem',
+                color: '#a79af7',
+                fontWeight: 600,
+              }}
+            >
+              PES University • DBMS Level 3
+            </div>
+          </div>
 
         {error && (
           <div className="alert alert-error" role="alert">
@@ -189,8 +216,9 @@ function LoginFormContent() {
             lineHeight: 1.4,
           }}
         >
-          <strong>Security Notice</strong>: Passwords validated via server-side salted bcrypt hashes.
-          Sessions managed via cryptographic HttpOnly JWT cookies.
+            <strong>Security Notice</strong>: Passwords validated via server-side salted bcrypt hashes.
+            Sessions managed via cryptographic HttpOnly JWT cookies.
+          </div>
         </div>
       </div>
     </div>

@@ -41,6 +41,12 @@ export async function GET(request: NextRequest) {
       FROM risk_assessments ra
       JOIN patients p ON p.patient_id = ra.patient_id
       LEFT JOIN assessment_findings af ON af.assessment_id = ra.assessment_id
+      -- Excludes the DBMS Studio's isolated trigger-demo sandbox session
+      -- (see app/api/dbms/triggers/demo/route.ts) — that assessment exists
+      -- purely to demonstrate trg_assessment_findings_count in isolation and
+      -- is purged/recreated on every Studio visit, so it has no business
+      -- showing up as real clinical history in a doctor's audit log.
+      WHERE ra.assessment_notes IS DISTINCT FROM 'DBMS_STUDIO_TRIGGER_DEMO'
       GROUP BY ra.assessment_id, ra.patient_id, p.mrn, p.full_name, ra.performed_by,
                ra.max_hop_depth, ra.total_active_medications, ra.direct_interaction_count,
                ra.multi_hop_candidate_count, ra.assessment_notes, ra.created_at

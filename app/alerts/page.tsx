@@ -12,7 +12,7 @@ interface Finding {
   severity_level: string;
   mechanism_category: string | null;
   evidence_sources: string;
-  finding_type: 'DIRECT_INTERACTION' | 'CANDIDATE_PATHWAY';
+  finding_type: 'DOCUMENTED_DIRECT' | 'CANDIDATE_PATHWAY';
 }
 
 interface AlertAssessment {
@@ -97,16 +97,16 @@ export default function AlertsPage() {
   return (
     <div className="app-container">
       {/* Header */}
-      <div className="card" style={{ marginBottom: 28 }}>
+      <div className="hero-banner" style={{ marginBottom: 28 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <span className="badge badge-doctor">Clinical Decision Support</span>
-              <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8' }}>
-                Transactional Audit Log
+              <span className="badge badge-doctor">Clinical decision support</span>
+              <span className="badge" style={{ background: 'rgba(124, 108, 245, 0.15)', color: '#a79af7' }}>
+                Transactional audit log
               </span>
             </div>
-            <h1>Polypharmacy Risk Alerts &amp; Assessment History</h1>
+            <h1 className="hero-title">Polypharmacy Risk Alerts &amp; Assessment History</h1>
             <p style={{ marginTop: 4, maxWidth: 650 }}>
               Chronological log of cross-database screening assessments. Records ACID transaction history
               from <code>risk_assessments</code> and trigger-audited <code>assessment_findings</code>.
@@ -311,14 +311,16 @@ export default function AlertsPage() {
                             className="badge"
                             style={{
                               background:
-                                f.finding_type === 'DIRECT_INTERACTION'
+                                f.finding_type === 'DOCUMENTED_DIRECT'
                                   ? 'rgba(244, 63, 94, 0.15)'
                                   : 'rgba(6, 182, 212, 0.15)',
-                              color: f.finding_type === 'DIRECT_INTERACTION' ? '#fb7185' : '#38bdf8',
+                              color: f.finding_type === 'DOCUMENTED_DIRECT' ? '#fb7185' : '#38bdf8',
                               fontSize: '0.72rem',
                             }}
                           >
-                            {f.finding_type === 'DIRECT_INTERACTION' ? 'Direct Documented Pair' : `${f.hop_count}-Hop Candidate Pathway`}
+                            {f.finding_type === 'DOCUMENTED_DIRECT'
+                              ? 'Documented interaction'
+                              : `Candidate pathway (hypothesis) — ${f.hop_count} hops`}
                           </span>
 
                           <span className={`badge ${getSeverityBadgeClass(f.severity_level)}`}>

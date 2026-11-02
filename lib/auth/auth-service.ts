@@ -145,28 +145,45 @@ export async function createUser(data: {
   const newUser = res.rows[0];
 
   // 2. Tier 2: PostgreSQL Engine DCL Execution
+  //
+  // NOTE: A `DO $$ ... $$` anonymous code block cannot accept bind parameters
+  // ($1/$2/...) — PostgreSQL's extended query protocol only recognizes those
+  // placeholders in the outer statement, not inside a dollar-quoted PL/pgSQL
+  // body, so an earlier version of this function silently failed here on
+  // every call (error 08P01) while still reporting success. The DCL layer
+  // never actually ran. The fix: escape the password via the driver's own
+  // `escapeLiteral` and interpolate plain SQL text (no bind params) into the
+  // DO block. `normalizedUsername` and `dbRole` are safe to interpolate
+  // directly — the former is already restricted to `[a-z0-9_]+` above, and
+  // the latter is one of two hardcoded constants.
   const dclStatements: string[] = [];
   const superPool = getAdminDclPool();
   const dbRole = data.role === 'ADMIN' ? 'role_admin' : 'role_doctor';
+  const dclClient = await superPool.connect();
 
   try {
-    // Parameterized EXECUTE format(%I, %L) within DO $$ block guarantees immune SQL identifier & literal quoting
+    const escapedPassword = dclClient.escapeLiteral(data.password);
     const dclSql = `
       DO $dcl$
       BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) THEN
-          EXECUTE format('CREATE USER %I WITH PASSWORD %L', $1, $2);
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${normalizedUsername}') THEN
+          EXECUTE format('CREATE USER %I WITH PASSWORD %L', '${normalizedUsername}', ${escapedPassword}::text);
         ELSE
-          EXECUTE format('ALTER USER %I WITH PASSWORD %L', $1, $2);
+          EXECUTE format('ALTER USER %I WITH PASSWORD %L', '${normalizedUsername}', ${escapedPassword}::text);
         END IF;
-        EXECUTE format('GRANT %I TO %I', $3, $1);
+        EXECUTE format('GRANT %I TO %I', '${dbRole}', '${normalizedUsername}');
       END $dcl$;
     `;
-    await superPool.query(dclSql, [normalizedUsername, data.password, dbRole]);
+    await dclClient.query(dclSql);
     dclStatements.push(`CREATE USER ${normalizedUsername} WITH PASSWORD '***';`);
     dclStatements.push(`GRANT ${dbRole} TO ${normalizedUsername};`);
   } catch (dclErr: any) {
-    console.error('DCL execution error while creating user:', dclErr);
+    // Roll back the Tier 1 application row rather than reporting a "Two-Tier
+    // user created" success when the Tier 2 DCL half never actually happened.
+    await query(`DELETE FROM user_accounts WHERE user_id = $1;`, [newUser.user_id], 'ADMIN');
+    throw new Error(`PostgreSQL DCL execution failed (CREATE USER/GRANT): ${dclErr.message}`);
+  } finally {
+    dclClient.release();
   }
 
   return {
@@ -178,4 +195,42 @@ export async function createUser(data: {
     createdAt: newUser.created_at,
     dclExecuted: dclStatements,
   };
+}
+
+/**
+ * Reverses createUser(): drops the PostgreSQL engine login role (Tier 2 DCL)
+ * and removes the application profile row (Tier 1), in that order so a
+ * dangling pg role is never left behind even if the app-row delete fails.
+ */
+export async function deleteUser(username: string): Promise<{ dclExecuted: string[] }> {
+  const normalizedUsername = username.trim().toLowerCase();
+  if (!/^[a-z0-9_]+$/.test(normalizedUsername)) {
+    throw new Error('Username can only contain alphanumeric characters and underscores.');
+  }
+  const dclExecuted: string[] = [];
+
+  // Same bind-parameter pitfall as createUser(): DO blocks cannot accept
+  // $1-style parameters, so this must interpolate plain SQL text. Safe here
+  // because normalizedUsername is restricted to [a-z0-9_]+ above.
+  const superPool = getAdminDclPool();
+  try {
+    const dropSql = `
+      DO $dcl$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${normalizedUsername}') THEN
+          EXECUTE format('DROP OWNED BY %I', '${normalizedUsername}');
+          EXECUTE format('DROP USER %I', '${normalizedUsername}');
+        END IF;
+      END $dcl$;
+    `;
+    await superPool.query(dropSql);
+    dclExecuted.push(`DROP USER ${normalizedUsername};`);
+  } catch (dclErr: any) {
+    console.error('DCL execution error while dropping user:', dclErr);
+    throw new Error(`PostgreSQL DCL execution failed (DROP USER): ${dclErr.message}`);
+  }
+
+  await query(`DELETE FROM user_accounts WHERE LOWER(username) = $1;`, [normalizedUsername], 'ADMIN');
+
+  return { dclExecuted };
 }

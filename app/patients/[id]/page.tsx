@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import AddPrescriptionModal from '@/components/modals/AddPrescriptionModal';
 import InteractionGraphViewer from '@/components/graph/InteractionGraphViewer';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import VerifyOnDisk from '@/components/ui/VerifyOnDisk';
 import { useToast } from '@/components/ui/Toast';
 
 interface Patient {
@@ -72,6 +74,14 @@ interface AssessmentData {
   scientific_disclaimer: string;
 }
 
+function severityBadgeClass(severity: string): string {
+  const s = severity?.toLowerCase();
+  if (s === 'major' || s === 'critical') return 'badge-major';
+  if (s === 'moderate') return 'badge-moderate';
+  if (s === 'minor') return 'badge-minor';
+  return 'badge-unknown';
+}
+
 export default function PatientDetailPage() {
   const params = useParams();
   const patientId = params?.id as string;
@@ -86,6 +96,21 @@ export default function PatientDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [assessmentNotes, setAssessmentNotes] = useState('');
   const [isAddRxModalOpen, setIsAddRxModalOpen] = useState(false);
+  const [pendingDiscontinue, setPendingDiscontinue] = useState<{ id: number; name: string } | null>(null);
+  const [discontinueLoading, setDiscontinueLoading] = useState(false);
+  const [maxHopDepth, setMaxHopDepth] = useState(3);
+  const [currentUserRole, setCurrentUserRole] = useState<'DOCTOR' | 'ADMIN' | null>(null);
+  const [pendingHardDelete, setPendingHardDelete] = useState<{ id: number; name: string } | null>(null);
+  const [hardDeleteLoading, setHardDeleteLoading] = useState(false);
+
+  // Patient demographics edit (PUT /api/patients/[id]) — previously real and
+  // working server-side, but with no button anywhere to reach it.
+  const [isEditingPatient, setIsEditingPatient] = useState(false);
+  const [editFullName, setEditFullName] = useState('');
+  const [editGender, setEditGender] = useState('');
+  const [editDateOfBirth, setEditDateOfBirth] = useState('');
+  const [editPrimaryCondition, setEditPrimaryCondition] = useState('');
+  const [editPatientLoading, setEditPatientLoading] = useState(false);
 
   // Editable dosage state
   const [editingRxId, setEditingRxId] = useState<number | null>(null);
@@ -121,6 +146,18 @@ export default function PatientDetailPage() {
     loadPatientData();
   }, [loadPatientData]);
 
+  // Determines whether the ADMIN-only hard-delete action on prescriptions is
+  // shown — the backend already enforces this via requireRole(['ADMIN']),
+  // this is purely so a DOCTOR never sees a button that would just 403.
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success) setCurrentUserRole(d.user.role);
+      })
+      .catch(() => {});
+  }, []);
+
   const handleRunScreening = async () => {
     if (!patientId) return;
     setAnalyzing(true);
@@ -130,7 +167,7 @@ export default function PatientDetailPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          maxHopDepth: 2,
+          maxHopDepth,
           notes: assessmentNotes.trim() || undefined,
         }),
       });
@@ -184,14 +221,19 @@ export default function PatientDetailPage() {
     }
   };
 
-  const handleDiscontinueRx = async (rxId: number, drugName: string) => {
-    if (!confirm(`Discontinue prescription for "${drugName}"?`)) return;
+  const handleDiscontinueRx = (rxId: number, drugName: string) => {
+    setPendingDiscontinue({ id: rxId, name: drugName });
+  };
+
+  const confirmDiscontinueRx = async () => {
+    if (!pendingDiscontinue) return;
+    setDiscontinueLoading(true);
     try {
       const res = await fetch('/api/prescriptions', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prescriptionId: rxId,
+          prescriptionId: pendingDiscontinue.id,
           action: 'DISCONTINUE',
         }),
       });
@@ -206,6 +248,81 @@ export default function PatientDetailPage() {
       }
     } catch (err: any) {
       addToast({ type: 'error', title: 'Error', message: err.message });
+    } finally {
+      setDiscontinueLoading(false);
+      setPendingDiscontinue(null);
+    }
+  };
+
+  const handleHardDeleteRx = (rxId: number, drugName: string) => {
+    setPendingHardDelete({ id: rxId, name: drugName });
+  };
+
+  const confirmHardDeleteRx = async () => {
+    if (!pendingHardDelete) return;
+    setHardDeleteLoading(true);
+    try {
+      const res = await fetch(`/api/prescriptions?prescription_id=${pendingHardDelete.id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        addToast({
+          type: 'info',
+          title: 'Prescription Hard-Deleted',
+          message: data.message,
+        });
+        loadPatientData();
+      } else {
+        addToast({ type: 'error', title: 'Delete Failed', message: data.error });
+      }
+    } catch (err: any) {
+      addToast({ type: 'error', title: 'Error', message: err.message });
+    } finally {
+      setHardDeleteLoading(false);
+      setPendingHardDelete(null);
+    }
+  };
+
+  const openEditPatient = () => {
+    if (!patient) return;
+    setEditFullName(patient.full_name);
+    setEditGender(patient.gender);
+    setEditDateOfBirth(patient.date_of_birth);
+    setEditPrimaryCondition(patient.primary_condition || '');
+    setIsEditingPatient(true);
+  };
+
+  const saveEditPatient = async () => {
+    if (!patientId) return;
+    setEditPatientLoading(true);
+    try {
+      const res = await fetch(`/api/patients/${patientId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: editFullName,
+          gender: editGender,
+          dateOfBirth: editDateOfBirth,
+          primaryCondition: editPrimaryCondition,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        addToast({
+          type: 'success',
+          title: 'Patient Demographics Updated',
+          message: data.message,
+        });
+        setIsEditingPatient(false);
+        loadPatientData();
+      } else {
+        addToast({ type: 'error', title: 'Update Failed', message: data.error });
+      }
+    } catch (err: any) {
+      addToast({ type: 'error', title: 'Error', message: err.message });
+    } finally {
+      setEditPatientLoading(false);
     }
   };
 
@@ -322,10 +439,9 @@ export default function PatientDetailPage() {
 
       {/* Patient Header Card */}
       <div
-        className="card"
+        className="hero-banner"
         style={{
           marginBottom: 24,
-          background: 'linear-gradient(135deg, rgba(17, 24, 39, 0.95) 0%, rgba(30, 41, 59, 0.85) 100%)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -335,10 +451,10 @@ export default function PatientDetailPage() {
       >
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="badge badge-doctor">PATIENT PROFILE #{patient.patient_id}</span>
-            <span className="badge badge-safe">Synthetic Ground Truth</span>
+            <span className="badge badge-doctor">Patient profile #{patient.patient_id}</span>
+            <span className="badge badge-safe">Synthetic ground truth</span>
           </div>
-          <h1 style={{ fontSize: '1.85rem', fontWeight: 800, color: 'var(--text-main)', marginTop: 8 }}>
+          <h1 className="hero-title" style={{ marginTop: 8 }}>
             {patient.full_name}
           </h1>
           <div
@@ -361,9 +477,94 @@ export default function PatientDetailPage() {
               </strong>
             </div>
           </div>
+
+          {isEditingPatient && (
+            <div
+              style={{
+                marginTop: 14,
+                padding: 14,
+                borderRadius: 'var(--radius-md)',
+                background: 'rgba(0, 0, 0, 0.3)',
+                border: '1px solid var(--border-subtle)',
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 10,
+                maxWidth: 520,
+              }}
+            >
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: 4 }}>
+                  Full Name
+                </label>
+                <input
+                  className="input-field"
+                  value={editFullName}
+                  onChange={(e) => setEditFullName(e.target.value)}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: 4 }}>
+                  Gender
+                </label>
+                <select className="input-field" value={editGender} onChange={(e) => setEditGender(e.target.value)}>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: 4 }}>
+                  Date of Birth
+                </label>
+                <input
+                  type="date"
+                  className="input-field"
+                  value={editDateOfBirth}
+                  onChange={(e) => setEditDateOfBirth(e.target.value)}
+                />
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: 4 }}>
+                  Primary Condition
+                </label>
+                <input
+                  className="input-field"
+                  value={editPrimaryCondition}
+                  onChange={(e) => setEditPrimaryCondition(e.target.value)}
+                  placeholder="e.g. Atrial Fibrillation"
+                />
+              </div>
+              <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, marginTop: 2 }}>
+                <button
+                  onClick={saveEditPatient}
+                  disabled={editPatientLoading}
+                  className="btn btn-primary btn-sm"
+                >
+                  {editPatientLoading ? 'Saving…' : 'Save (UPDATE SQL)'}
+                </button>
+                <button
+                  onClick={() => setIsEditingPatient(false)}
+                  disabled={editPatientLoading}
+                  className="btn btn-secondary btn-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
-        <div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {!isEditingPatient && (
+            <button
+              onClick={openEditPatient}
+              className="btn btn-secondary"
+              style={{ padding: '10px 16px' }}
+              title="Edit demographics — runs UPDATE patients SET ... in PostgreSQL"
+            >
+              ✎ Edit Patient
+            </button>
+          )}
           <button
             onClick={() => setIsAddRxModalOpen(true)}
             className="btn btn-primary"
@@ -472,7 +673,7 @@ export default function PatientDetailPage() {
                         {rx.prescribed_by}
                       </td>
                       <td>{rx.start_date}</td>
-                      <td style={{ textAlign: 'right' }}>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <button
                           onClick={() => handleDiscontinueRx(rx.prescription_id, rx.canonical_name)}
                           className="btn btn-secondary btn-sm"
@@ -480,6 +681,23 @@ export default function PatientDetailPage() {
                         >
                           Discontinue
                         </button>
+                        {currentUserRole === 'ADMIN' && (
+                          <button
+                            onClick={() => handleHardDeleteRx(rx.prescription_id, rx.canonical_name)}
+                            className="btn btn-sm"
+                            style={{
+                              padding: '4px 8px',
+                              fontSize: '0.75rem',
+                              marginLeft: 6,
+                              background: 'rgba(239, 68, 68, 0.12)',
+                              color: '#fca5a5',
+                              border: '1px solid rgba(239, 68, 68, 0.3)',
+                            }}
+                            title="Admin only: permanently removes the row (DELETE), unlike Discontinue which keeps it as history"
+                          >
+                            🗑️ Delete
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -511,6 +729,40 @@ export default function PatientDetailPage() {
               onChange={(e) => setAssessmentNotes(e.target.value)}
             />
           </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: 6 }}>
+              Traversal depth
+            </label>
+            <div style={{ display: 'flex', gap: 4, background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', padding: 3 }}>
+              {[1, 2, 3].map((depth) => (
+                <button
+                  key={depth}
+                  type="button"
+                  onClick={() => setMaxHopDepth(depth)}
+                  title={
+                    depth === 1
+                      ? 'Direct pairwise findings only — PostgreSQL, no Neo4j traversal'
+                      : `Direct findings + up to ${depth}-hop candidate pathways in Neo4j`
+                  }
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: 'none',
+                    background: maxHopDepth === depth ? 'var(--primary)' : 'transparent',
+                    color: maxHopDepth === depth ? '#fff' : 'var(--text-secondary)',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    fontFamily: 'var(--font-mono)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {depth}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div>
             <button
               onClick={handleRunScreening}
@@ -603,15 +855,20 @@ export default function PatientDetailPage() {
                     }}
                   >
                     <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span className="badge" style={{ background: 'rgba(148, 163, 184, 0.1)', color: '#cbd5e1', fontSize: '0.68rem' }}>
+                          Documented interaction
+                        </span>
+                      </div>
                       <div style={{ fontWeight: 700, color: '#f8fafc', fontSize: '0.95rem' }}>
                         {df.drug_a_name} &harr; {df.drug_b_name}
                       </div>
                       <div style={{ fontSize: '0.78rem', color: '#cbd5e1', marginTop: 4 }}>
-                        Mechanism: {df.mechanism_categories || 'Direct interaction'}
+                        Mechanism: {df.mechanism_categories || 'Not categorized'}
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <span className="badge badge-major">{df.severity_level}</span>
+                      <span className={`badge ${severityBadgeClass(df.severity_level)}`}>{df.severity_level}</span>
                       <div style={{ fontSize: '0.7rem', fontFamily: 'monospace', color: '#94a3b8', marginTop: 4 }}>
                         {df.evidence_sources}
                       </div>
@@ -627,9 +884,20 @@ export default function PatientDetailPage() {
             <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#f8fafc', marginBottom: 12 }}>
               Bounded Multi-Hop Candidate Pathways (Neo4j Graph Traversal)
             </h3>
+
+            {/* Scientific disclaimer \u2014 verbatim from the API, shown as a
+                prominent callout, never fine print. Multi-hop results are
+                mechanistic hypotheses, not confirmed clinical interactions. */}
+            <div className="disclaimer-banner" style={{ marginBottom: 16 }}>
+              <span className="disclaimer-icon">⚠</span>
+              <span className="disclaimer-text">{assessment.scientific_disclaimer}</span>
+            </div>
+
             {assessment.multi_hop_candidates.length === 0 ? (
               <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                No multi-hop bridge pathways discovered within 2 hops.
+                {maxHopDepth === 1
+                  ? 'Traversal depth was set to 1 (direct findings only) \u2014 Neo4j was not queried.'
+                  : `No candidate pathways discovered within ${maxHopDepth} hops.`}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -640,26 +908,57 @@ export default function PatientDetailPage() {
                       padding: 14,
                       borderRadius: 8,
                       background: 'rgba(6, 182, 212, 0.08)',
-                      border: '1px solid rgba(6, 182, 212, 0.3)',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
+                      border: '1px dashed rgba(6, 182, 212, 0.4)',
                     }}
                   >
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#f8fafc', fontSize: '0.95rem' }}>
-                        {cand.nodes.join(' \u2192 ')}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                      <div>
+                        <span className="badge badge-moderate" style={{ marginBottom: 8, display: 'inline-block' }}>
+                          Candidate pathway (hypothesis)
+                        </span>
+                        <div style={{ fontWeight: 700, color: '#f8fafc', fontSize: '0.95rem' }}>
+                          {cand.nodes.join(' \u2192 ')}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: '#cbd5e1', marginTop: 4 }}>
+                          Bridge drug: <strong style={{ color: '#f59e0b' }}>{cand.bridge_drugs.join(', ')}</strong> &middot; {cand.hop_count} hops
+                        </div>
                       </div>
-                      <div style={{ fontSize: '0.78rem', color: '#cbd5e1', marginTop: 4 }}>
-                        Bridge Drug: <strong style={{ color: '#f59e0b' }}>{cand.bridge_drugs.join(', ')}</strong> ({cand.hop_count} hops)
+                      <div style={{ fontSize: '0.7rem', fontFamily: 'monospace', color: '#94a3b8', textAlign: 'right', flexShrink: 0 }}>
+                        Neo4j Cypher traversal
                       </div>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <span className="badge badge-moderate">Candidate Pathway</span>
-                      <div style={{ fontSize: '0.7rem', fontFamily: 'monospace', color: '#94a3b8', marginTop: 4 }}>
-                        Neo4j Cypher Traversal
-                      </div>
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                      {cand.edge_severities.map((sev, si) => (
+                        <span key={si} className={`badge ${severityBadgeClass(sev)}`} style={{ fontSize: '0.68rem' }}>
+                          Edge {si + 1}: {sev}
+                        </span>
+                      ))}
+                      {Array.from(new Set(cand.edge_mechanisms.flat().filter(Boolean))).map((mech, mi) => (
+                        <span
+                          key={mi}
+                          className="badge"
+                          style={{ background: 'transparent', border: '1px solid rgba(6, 182, 212, 0.4)', color: '#67e8f9', fontSize: '0.68rem' }}
+                        >
+                          {mech}
+                        </span>
+                      ))}
+                      {Array.from(new Set(cand.edge_sources.filter(Boolean))).map((src, srci) => (
+                        <span
+                          key={srci}
+                          className="badge"
+                          style={{ background: 'rgba(255, 255, 255, 0.04)', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.68rem' }}
+                        >
+                          {src}
+                        </span>
+                      ))}
                     </div>
+
+                    <VerifyOnDisk
+                      query={`MATCH path = (d1:Drug {canonical_name: "${cand.drug_a_name}"})-[r:INTERACTS_WITH*${cand.hop_count}]-(d2:Drug {canonical_name: "${cand.drug_b_name}"})\nRETURN path;`}
+                      language="cypher"
+                      expected={`A ${cand.hop_count + 1}-node path through ${cand.bridge_drugs.join(', ')} — the exact bridge this app just found.`}
+                    />
                   </div>
                 ))}
               </div>
@@ -680,6 +979,37 @@ export default function PatientDetailPage() {
           });
           loadPatientData();
         }}
+      />
+
+      <ConfirmDialog
+        isOpen={!!pendingDiscontinue}
+        title="Discontinue prescription"
+        message={
+          pendingDiscontinue
+            ? `This marks "${pendingDiscontinue.name}" as discontinued in PostgreSQL. The patient's active medication count and future screenings will no longer include it.`
+            : ''
+        }
+        confirmText="Discontinue"
+        destructive
+        loading={discontinueLoading}
+        onConfirm={confirmDiscontinueRx}
+        onCancel={() => setPendingDiscontinue(null)}
+      />
+
+      <ConfirmDialog
+        isOpen={!!pendingHardDelete}
+        title="Permanently delete prescription"
+        message={
+          pendingHardDelete
+            ? `This runs a hard DELETE on "${pendingHardDelete.name}" — the row is gone from PostgreSQL entirely, unlike Discontinue which keeps it as history. Type DELETE to confirm.`
+            : ''
+        }
+        confirmText="Delete permanently"
+        confirmKeyword="DELETE"
+        destructive
+        loading={hardDeleteLoading}
+        onConfirm={confirmHardDeleteRx}
+        onCancel={() => setPendingHardDelete(null)}
       />
     </div>
   );

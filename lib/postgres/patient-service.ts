@@ -1,4 +1,4 @@
-import { query, getPostgresPool } from './client';
+import { query, getPostgresPool, DatabaseRole } from './client';
 
 export interface Patient {
   patient_id: number;
@@ -7,6 +7,7 @@ export interface Patient {
   date_of_birth: string;
   gender: string;
   is_synthetic: boolean;
+  primary_condition: string | null;
   active_medication_count?: number;
 }
 
@@ -44,10 +45,11 @@ export async function getAllPatients(): Promise<Patient[]> {
       p.date_of_birth::TEXT,
       p.gender,
       p.is_synthetic,
+      p.primary_condition,
       COUNT(pr.prescription_id) FILTER (WHERE pr.status = 'ACTIVE') AS active_medication_count
     FROM patients p
     LEFT JOIN prescriptions pr ON pr.patient_id = p.patient_id
-    GROUP BY p.patient_id, p.mrn, p.full_name, p.date_of_birth, p.gender, p.is_synthetic
+    GROUP BY p.patient_id, p.mrn, p.full_name, p.date_of_birth, p.gender, p.is_synthetic, p.primary_condition
     ORDER BY p.patient_id ASC;
   `;
   const res = await query<Patient>(sql, [], 'DOCTOR');
@@ -65,7 +67,8 @@ export async function getPatientById(patientId: number): Promise<Patient | null>
       full_name,
       date_of_birth::TEXT,
       gender,
-      is_synthetic
+      is_synthetic,
+      primary_condition
     FROM patients
     WHERE patient_id = $1;
   `;
@@ -204,17 +207,20 @@ export async function persistAssessmentWithFindings(
 }
 
 
-export async function createPatient(data: {
-  fullName: string;
-  mrn: string;
-  gender: string;
-  dateOfBirth: string;
-  primaryCondition?: string;
-}): Promise<Patient> {
+export async function createPatient(
+  data: {
+    fullName: string;
+    mrn: string;
+    gender: string;
+    dateOfBirth: string;
+    primaryCondition?: string;
+  },
+  role: DatabaseRole = 'DOCTOR'
+): Promise<Patient> {
   const sql = `
     INSERT INTO patients (mrn, full_name, gender, date_of_birth, primary_condition, is_synthetic)
     VALUES ($1, $2, $3, $4, $5, TRUE)
-    RETURNING patient_id, mrn, full_name, date_of_birth::TEXT, gender, is_synthetic;
+    RETURNING patient_id, mrn, full_name, date_of_birth::TEXT, gender, is_synthetic, primary_condition;
   `;
   const res = await query<Patient>(sql, [
     data.mrn.trim(),
@@ -222,7 +228,7 @@ export async function createPatient(data: {
     data.gender,
     data.dateOfBirth,
     data.primaryCondition?.trim() || null,
-  ], 'ADMIN');
+  ], role);
   return {
     ...res.rows[0],
     active_medication_count: 0,
@@ -236,17 +242,18 @@ export async function updatePatient(
     gender?: string;
     dateOfBirth?: string;
     primaryCondition?: string;
-  }
+  },
+  role: DatabaseRole = 'DOCTOR'
 ): Promise<Patient | null> {
   const sql = `
     UPDATE patients
-    SET 
+    SET
       full_name = COALESCE($2, full_name),
       gender = COALESCE($3, gender),
       date_of_birth = COALESCE($4::DATE, date_of_birth),
       primary_condition = COALESCE($5, primary_condition)
     WHERE patient_id = $1
-    RETURNING patient_id, mrn, full_name, date_of_birth::TEXT, gender, is_synthetic;
+    RETURNING patient_id, mrn, full_name, date_of_birth::TEXT, gender, is_synthetic, primary_condition;
   `;
   const res = await query<Patient>(sql, [
     patientId,
@@ -254,7 +261,7 @@ export async function updatePatient(
     data.gender || null,
     data.dateOfBirth || null,
     data.primaryCondition?.trim() || null,
-  ], 'ADMIN');
+  ], role);
   return res.rows[0] || null;
 }
 

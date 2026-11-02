@@ -1,9 +1,41 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, Suspense } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import AddPatientModal from '@/components/modals/AddPatientModal';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
+
+// This page is always behind auth middleware and fetches per-session data
+// client-side regardless, so static prerendering was never valid for it —
+// kept as a safety net alongside the Suspense boundary below (Next 14's
+// static-export bailout check for useSearchParams() in a client component
+// still requires an actual Suspense boundary; `dynamic` alone doesn't
+// satisfy it).
+export const dynamic = 'force-dynamic';
+
+// Isolates the one hook (useSearchParams) that forces Next's CSR bailout
+// check, so only this tiny component needs the Suspense boundary instead of
+// the whole dashboard tree.
+function ForbiddenRedirectToast() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const { addToast } = useToast();
+
+  useEffect(() => {
+    if (searchParams.get('forbidden') === 'admin') {
+      addToast({
+        type: 'error',
+        title: 'Admin Console requires a different role',
+        message: "That section is restricted to the ADMIN role. You're signed in as a DOCTOR.",
+      });
+      router.replace('/dashboard');
+    }
+  }, [searchParams, addToast, router]);
+
+  return null;
+}
 
 interface Patient {
   patient_id: number;
@@ -30,6 +62,8 @@ export default function DoctorDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{ id: number; name: string } | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const fetchPatients = async () => {
     try {
@@ -82,13 +116,15 @@ export default function DoctorDashboard() {
     };
   }, []);
 
-  const handleDeletePatient = async (patientId: number, name: string) => {
-    if (!confirm(`Are you sure you want to delete patient "${name}"? This will CASCADE and delete all their child prescriptions and assessments!`)) {
-      return;
-    }
+  const handleDeletePatient = (patientId: number, name: string) => {
+    setPendingDelete({ id: patientId, name });
+  };
 
+  const confirmDeletePatient = async () => {
+    if (!pendingDelete) return;
+    setDeleteLoading(true);
     try {
-      const res = await fetch(`/api/patients/${patientId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/patients/${pendingDelete.id}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
         addToast({
@@ -110,6 +146,9 @@ export default function DoctorDashboard() {
         title: 'Error',
         message: err.message,
       });
+    } finally {
+      setDeleteLoading(false);
+      setPendingDelete(null);
     }
   };
 
@@ -133,22 +172,27 @@ export default function DoctorDashboard() {
 
   return (
     <div className="app-container">
+      <Suspense fallback={null}>
+        <ForbiddenRedirectToast />
+      </Suspense>
+
       {/* Welcome Banner */}
       <div
-        className="card"
+        className="hero-banner"
         style={{
           marginBottom: 28,
-          background: 'linear-gradient(135deg, rgba(17, 24, 39, 0.9) 0%, rgba(30, 41, 59, 0.8) 100%)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 20,
         }}
       >
         <div>
           <span className="badge badge-doctor" style={{ marginBottom: 10, display: 'inline-block' }}>
-            CLINICAL OPERATING SYSTEM
+            Clinical operating system
           </span>
-          <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)' }}>
+          <h1 className="hero-title">
             Welcome, {user ? user.fullName : 'Doctor'}
           </h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', marginTop: 4 }}>
@@ -357,6 +401,22 @@ export default function DoctorDashboard() {
           });
           fetchPatients();
         }}
+      />
+
+      <ConfirmDialog
+        isOpen={!!pendingDelete}
+        title="Delete patient record"
+        message={
+          pendingDelete
+            ? `This permanently deletes "${pendingDelete.name}" and cascades to all their prescriptions and risk assessments in PostgreSQL. This can't be undone.`
+            : ''
+        }
+        confirmText="Delete patient"
+        confirmKeyword="DELETE"
+        destructive
+        loading={deleteLoading}
+        onConfirm={confirmDeletePatient}
+        onCancel={() => setPendingDelete(null)}
       />
     </div>
   );

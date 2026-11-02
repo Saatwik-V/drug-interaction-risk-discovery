@@ -54,7 +54,13 @@ GRANT SELECT ON TABLE ddi_mechanisms TO role_doctor;
 GRANT SELECT ON TABLE v_patient_active_regimens TO role_doctor;
 
 -- Clinical patient care & prescribing
-GRANT SELECT ON TABLE patients TO role_doctor;
+-- INSERT/UPDATE (not DELETE) on patients: clinicians register and edit
+-- synthetic patient records from the dashboard; deleting a patient cascades
+-- across prescriptions/assessments/findings and stays ADMIN-only, enforced
+-- both at the application layer (requireRole(['ADMIN'])) and here (no
+-- DELETE grant below).
+GRANT SELECT, INSERT, UPDATE ON TABLE patients TO role_doctor;
+GRANT USAGE, SELECT ON SEQUENCE patients_patient_id_seq TO role_doctor;
 GRANT SELECT, INSERT, UPDATE ON TABLE prescriptions TO role_doctor;
 GRANT USAGE, SELECT ON SEQUENCE prescriptions_prescription_id_seq TO role_doctor;
 

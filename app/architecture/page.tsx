@@ -58,18 +58,11 @@ VALUES (101, 1, 4, 2, 'warfarin -> amiodarone -> simvastatin', 'CANDIDATE_PATHWA
   return (
     <div className="app-container">
       {/* Header */}
-      <div
-        className="card"
-        style={{
-          marginBottom: 24,
-          background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.9) 100%)',
-          border: '1px solid rgba(99, 102, 241, 0.3)',
-        }}
-      >
+      <div className="hero-banner" style={{ marginBottom: 24 }}>
         <span className="badge badge-doctor" style={{ marginBottom: 8, display: 'inline-block' }}>
-          SYSTEM BLUEPRINT &amp; REPO TRACE
+          System blueprint &amp; repo trace
         </span>
-        <h1 style={{ fontSize: '1.85rem', fontWeight: 800, color: '#f8fafc', marginTop: 4 }}>
+        <h1 className="hero-title" style={{ marginTop: 4 }}>
           Dual-Database Architecture &amp; Request Lifecycle
         </h1>
         <p style={{ color: '#94a3b8', fontSize: '0.95rem', marginTop: 4 }}>

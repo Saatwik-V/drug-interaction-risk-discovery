@@ -21,11 +21,22 @@ export async function POST(
     }
 
     let notes = 'Routine polypharmacy multi-hop evaluation';
+    let maxHopDepth = 3;
 
     try {
       const body = await request.json();
       if (body && typeof body.notes === 'string') {
         notes = body.notes.trim() || notes;
+      }
+      if (body && body.maxHopDepth !== undefined) {
+        const parsedDepth = Number(body.maxHopDepth);
+        if (!Number.isInteger(parsedDepth) || parsedDepth < 1 || parsedDepth > 3) {
+          return NextResponse.json(
+            { success: false, error: 'maxHopDepth must be an integer between 1 and 3.' },
+            { status: 400 }
+          );
+        }
+        maxHopDepth = parsedDepth;
       }
     } catch {
       // Body is optional
@@ -36,7 +47,8 @@ export async function POST(
     const assessmentResult = await orchestrateRiskAssessment(
       patientId,
       session.username,
-      notes
+      notes,
+      maxHopDepth
     );
 
     return NextResponse.json({

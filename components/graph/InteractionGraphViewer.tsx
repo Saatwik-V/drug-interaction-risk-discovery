@@ -39,7 +39,6 @@ export default function InteractionGraphViewer({
 }: InteractionGraphViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [copiedCypher, setCopiedCypher] = useState(false);
-  const [hopDepthFilter, setHopDepthFilter] = useState<number>(3);
   const [severityFilter, setSeverityFilter] = useState<string>('ALL');
 
   // Interactive Drag State
@@ -196,10 +195,28 @@ export default function InteractionGraphViewer({
     render();
 
     // Mouse Drag Listeners
-    const handleMouseDown = (e: MouseEvent) => {
+    //
+    // Node positions live in the canvas's native coordinate space (the
+    // `width`/`height` attributes, e.g. 800x380), but the canvas is styled
+    // to render responsively (width: 100%) — so its CSS-rendered size from
+    // getBoundingClientRect() only equals the native size when the
+    // container happens to be exactly `width` pixels wide. On any narrower
+    // viewport the two diverge, and using raw CSS-space coordinates for hit
+    // testing silently misses every node. Scale by the native/CSS ratio so
+    // clicks and drags land where the pointer actually is regardless of how
+    // the canvas has been scaled down.
+    const toCanvasCoords = (e: MouseEvent): { x: number; y: number } => {
       const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
+      const scaleX = width / rect.width;
+      const scaleY = height / rect.height;
+      return {
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY,
+      };
+    };
+
+    const handleMouseDown = (e: MouseEvent) => {
+      const { x: mx, y: my } = toCanvasCoords(e);
       const clicked = simNodes.find((n) => n.x && n.y && Math.hypot(n.x - mx, n.y - my) < 22);
       if (clicked) {
         dragNodeRef.current = clicked;
@@ -209,9 +226,9 @@ export default function InteractionGraphViewer({
 
     const handleMouseMove = (e: MouseEvent) => {
       if (dragNodeRef.current) {
-        const rect = canvas.getBoundingClientRect();
-        dragNodeRef.current.x = e.clientX - rect.left;
-        dragNodeRef.current.y = e.clientY - rect.top;
+        const { x, y } = toCanvasCoords(e);
+        dragNodeRef.current.x = x;
+        dragNodeRef.current.y = y;
       }
     };
 

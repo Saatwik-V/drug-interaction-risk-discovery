@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     // Adding synthetic patient requires authenticated Doctor or Admin
-    await requireRole(request, ['DOCTOR', 'ADMIN']);
+    const session = await requireRole(request, ['DOCTOR', 'ADMIN']);
 
     const body = await request.json();
     const { fullName, mrn, gender, dateOfBirth, primaryCondition } = body || {};
@@ -35,13 +35,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const patient = await createPatient({
-      fullName,
-      mrn,
-      gender,
-      dateOfBirth,
-      primaryCondition,
-    });
+    // Writes through the DB pool matching the caller's actual session role
+    // (app_doctor_user / app_admin_user), not a hardcoded admin connection —
+    // otherwise role_doctor's lack of INSERT on `patients` would never
+    // actually be exercised, and a compromised DOCTOR session would have
+    // silent admin-level DB access regardless of the app-level role check.
+    const patient = await createPatient(
+      {
+        fullName,
+        mrn,
+        gender,
+        dateOfBirth,
+        primaryCondition,
+      },
+      session.role
+    );
 
     return NextResponse.json(
       { success: true, data: patient, message: 'Synthetic patient record created in PostgreSQL.' },

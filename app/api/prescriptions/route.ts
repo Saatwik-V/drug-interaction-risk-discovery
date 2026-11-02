@@ -57,10 +57,14 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error: any) {
+    const friendlyError =
+      error.constraint === 'uq_patient_drug_active'
+        ? 'This patient already has an active prescription for that drug. Discontinue the existing one first, or edit its dosage instead of adding a new order.'
+        : error.message || 'Failed to record prescription.';
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'Failed to record prescription.',
+        error: friendlyError,
         code: error.code,
         constraint: error.constraint,
       },

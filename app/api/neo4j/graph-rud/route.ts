@@ -4,6 +4,7 @@ import {
   createGraphInteraction,
   updateGraphInteraction,
   deleteGraphInteraction,
+  getGraphOverview,
 } from '@/lib/neo4j/graph-rud-service';
 import { requireRole, handleAuthError } from '@/lib/auth/session';
 
@@ -14,6 +15,16 @@ export async function GET(request: NextRequest) {
     await requireRole(request, ['DOCTOR', 'ADMIN']);
 
     const { searchParams } = new URL(request.url);
+    const action = searchParams.get('action');
+
+    // Bundles SHOW CONSTRAINTS, node/edge counts, degree centrality ranking,
+    // and the full curated demo graph — everything section 4 and 9D of the
+    // viva guide otherwise require opening Neo4j Browser for.
+    if (action === 'overview') {
+      const overview = await getGraphOverview();
+      return NextResponse.json({ success: true, overview });
+    }
+
     const drug = searchParams.get('drug') || 'warfarin';
 
     const starNetwork = await getDrugStarNetwork(drug);
