@@ -60,6 +60,10 @@ export async function POST(request: NextRequest) {
     const friendlyError =
       error.constraint === 'uq_patient_drug_active'
         ? 'This patient already has an active prescription for that drug. Discontinue the existing one first, or edit its dosage instead of adding a new order.'
+        : error.constraint === 'fk_prescription_patient'
+        ? 'That patient ID does not exist. Pick a patient from the cohort list.'
+        : error.constraint === 'fk_prescription_drug'
+        ? 'That drug ID does not exist in the master catalog.'
         : error.message || 'Failed to record prescription.';
     return NextResponse.json(
       {
@@ -89,11 +93,15 @@ export async function PUT(request: NextRequest) {
 
     if (action === 'DISCONTINUE') {
       const ok = await discontinuePrescription(Number(prescriptionId));
+      if (!ok) {
+        return NextResponse.json(
+          { success: false, error: `Prescription #${prescriptionId} not found.` },
+          { status: 404 }
+        );
+      }
       return NextResponse.json({
-        success: ok,
-        message: ok
-          ? `Prescription #${prescriptionId} discontinued in PostgreSQL.`
-          : 'Prescription not found.',
+        success: true,
+        message: `Prescription #${prescriptionId} discontinued in PostgreSQL.`,
       });
     }
 
@@ -110,8 +118,15 @@ export async function PUT(request: NextRequest) {
       frequency
     );
 
+    if (!updated) {
+      return NextResponse.json(
+        { success: false, error: `Prescription #${prescriptionId} not found.` },
+        { status: 404 }
+      );
+    }
+
     return NextResponse.json({
-      success: !!updated,
+      success: true,
       data: updated,
       message: `Prescription #${prescriptionId} dosage updated in PostgreSQL.`,
     });
@@ -138,11 +153,15 @@ export async function DELETE(request: NextRequest) {
     }
 
     const ok = await deletePrescription(prescriptionId);
+    if (!ok) {
+      return NextResponse.json(
+        { success: false, error: `Prescription #${prescriptionId} not found.` },
+        { status: 404 }
+      );
+    }
     return NextResponse.json({
-      success: ok,
-      message: ok
-        ? `Prescription #${prescriptionId} hard-deleted from PostgreSQL.`
-        : 'Prescription not found.',
+      success: true,
+      message: `Prescription #${prescriptionId} hard-deleted from PostgreSQL.`,
     });
   } catch (error: any) {
     return NextResponse.json(

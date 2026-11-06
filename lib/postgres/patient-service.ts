@@ -270,3 +270,9 @@ export async function deletePatient(patientId: number): Promise<boolean> {
   const res = await query(sql, [patientId], 'ADMIN');
   return (res.rowCount || 0) > 0;
 }
+
+export async function deletePatientByName(fullName: string): Promise<boolean> {
+  const sql = `DELETE FROM patients WHERE full_name = $1;`;
+  const res = await query(sql, [fullName], 'ADMIN');
+  return (res.rowCount || 0) > 0;
+}

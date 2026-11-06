@@ -101,7 +101,12 @@ RETURNS TABLE (
     drug_b VARCHAR(255),
     severity VARCHAR(20),
     mechanisms TEXT,
-    sources VARCHAR(100)
+    -- TEXT, not VARCHAR(100): assessment_findings.evidence_sources was
+    -- widened to TEXT (see 01_schema.sql) because multi-hop pathways
+    -- concatenate several source strings and can exceed 100 chars. This
+    -- RETURNS TABLE signature has to match or Postgres raises "structure of
+    -- query does not match function result type" on every call.
+    sources TEXT
 ) AS $$
 DECLARE
     v_assessment_id BIGINT;
@@ -167,5 +172,39 @@ BEGIN
     JOIN drugs da ON da.drug_id = af.drug_a_id
     JOIN drugs db ON db.drug_id = af.drug_b_id
     WHERE af.assessment_id = v_assessment_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ------------------------------------------------------------------------------
+-- 5. OVERLOADED STORED FUNCTION: DIRECT SCREENING BY PATIENT FULL NAME
+-- ------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_perform_patient_direct_screening(
+    p_patient_name VARCHAR(255),
+    p_doctor_username VARCHAR(100),
+    p_notes TEXT DEFAULT 'Routine direct pairwise screening'
+)
+RETURNS TABLE (
+    assessment_id BIGINT,
+    drug_a VARCHAR(255),
+    drug_b VARCHAR(255),
+    severity VARCHAR(20),
+    mechanisms TEXT,
+    sources TEXT
+) AS $$
+DECLARE
+    v_patient_id INT;
+BEGIN
+    -- Resolve patient_id from unique full_name
+    SELECT patient_id INTO v_patient_id
+    FROM patients
+    WHERE LOWER(full_name) = LOWER(p_patient_name);
+
+    IF v_patient_id IS NULL THEN
+        RAISE EXCEPTION 'Patient with full_name "%" does not exist in the patient registry.', p_patient_name;
+    END IF;
+
+    -- Delegate to the primary implementation
+    RETURN QUERY
+    SELECT * FROM fn_perform_patient_direct_screening(v_patient_id, p_doctor_username, p_notes);
 END;
 $$ LANGUAGE plpgsql;

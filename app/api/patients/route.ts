@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAllPatients, createPatient } from '@/lib/postgres/patient-service';
+import { getAllPatients, createPatient, deletePatientByName } from '@/lib/postgres/patient-service';
 import { requireRole, handleAuthError } from '@/lib/auth/session';
 
 export const dynamic = 'force-dynamic';
@@ -67,5 +67,36 @@ export async function POST(request: NextRequest) {
       },
       { status: 400 }
     );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    await requireRole(request, ['ADMIN']);
+
+    const { searchParams } = new URL(request.url);
+    const fullName = searchParams.get('full_name')?.trim();
+
+    if (!fullName) {
+      return NextResponse.json(
+        { success: false, error: 'Missing full_name parameter.' },
+        { status: 400 }
+      );
+    }
+
+    const deleted = await deletePatientByName(fullName);
+    if (!deleted) {
+      return NextResponse.json(
+        { success: false, error: `Patient with full_name "${fullName}" not found or already deleted.` },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `Patient "${fullName}" deleted with foreign key CASCADE to prescriptions and assessments.`,
+    });
+  } catch (error: any) {
+    return handleAuthError(error);
   }
 }

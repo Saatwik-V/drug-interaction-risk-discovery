@@ -9,9 +9,10 @@ export async function GET(request: NextRequest) {
     await requireRole(request, ['DOCTOR', 'ADMIN']);
 
     const { searchParams } = new URL(request.url);
+    const fullName = searchParams.get('full_name')?.trim();
     const patientId = parseInt(searchParams.get('patient_id') || '0', 10);
 
-    if (!patientId) {
+    if (!fullName && !patientId) {
       // Find ephemeral test patients if any exist
       const res = await query(
         `SELECT patient_id, mrn, full_name, created_at FROM patients WHERE mrn LIKE 'CASCADE-TEST-%' ORDER BY patient_id DESC;`,
@@ -21,19 +22,55 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, ephemeralPatients: res.rows });
     }
 
+    let targetId = patientId;
+    let targetName = fullName || '';
+
+    if (fullName) {
+      const pLookup = await query(
+        `SELECT patient_id, mrn, full_name FROM patients WHERE full_name = $1;`,
+        [fullName],
+        'DOCTOR'
+      );
+      if (pLookup.rows.length === 0) {
+        return NextResponse.json({
+          success: true,
+          fullName,
+          patientId: null,
+          counts: {
+            patients: 0,
+            prescriptions: 0,
+            risk_assessments: 0,
+            assessment_findings: 0,
+          },
+        });
+      }
+      targetId = pLookup.rows[0].patient_id;
+      targetName = pLookup.rows[0].full_name;
+    } else {
+      const pLookup = await query(
+        `SELECT patient_id, mrn, full_name FROM patients WHERE patient_id = $1;`,
+        [patientId],
+        'DOCTOR'
+      );
+      if (pLookup.rows.length > 0) {
+        targetName = pLookup.rows[0].full_name;
+      }
+    }
+
     // Inspect child record counts across the 4 cascading tables
-    const patientRes = await query(`SELECT count(*) FROM patients WHERE patient_id = $1;`, [patientId], 'DOCTOR');
-    const rxRes = await query(`SELECT count(*) FROM prescriptions WHERE patient_id = $1;`, [patientId], 'DOCTOR');
-    const assessRes = await query(`SELECT count(*) FROM risk_assessments WHERE patient_id = $1;`, [patientId], 'DOCTOR');
+    const patientRes = await query(`SELECT count(*) FROM patients WHERE patient_id = $1;`, [targetId], 'DOCTOR');
+    const rxRes = await query(`SELECT count(*) FROM prescriptions WHERE patient_id = $1;`, [targetId], 'DOCTOR');
+    const assessRes = await query(`SELECT count(*) FROM risk_assessments WHERE patient_id = $1;`, [targetId], 'DOCTOR');
     const findingsRes = await query(
       `SELECT count(*) FROM assessment_findings af JOIN risk_assessments ra ON af.assessment_id = ra.assessment_id WHERE ra.patient_id = $1;`,
-      [patientId],
+      [targetId],
       'DOCTOR'
     );
 
     return NextResponse.json({
       success: true,
-      patientId,
+      patientId: targetId,
+      fullName: targetName,
       counts: {
         patients: Number(patientRes.rows[0].count),
         prescriptions: Number(rxRes.rows[0].count),
@@ -66,6 +103,7 @@ export async function POST(request: NextRequest) {
       'ADMIN'
     );
     const patientId = pRes.rows[0].patient_id;
+    const fullName = pRes.rows[0].full_name;
 
     // 2. Insert 2 prescriptions (using Drug 1 Warfarin and Drug 4 Amiodarone)
     await query(
@@ -100,6 +138,7 @@ export async function POST(request: NextRequest) {
       message: 'Spawned ephemeral test patient with child records across 4 relational tables.',
       patientId,
       mrn,
+      fullName,
       counts: {
         patients: 1,
         prescriptions: 2,
@@ -113,23 +152,22 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Executes DELETE on the parent patient, causing ON DELETE CASCADE across the 4 tables.
+ * Executes DELETE on the parent patient using full_name only (assuming full_name is unique),
+ * triggering PostgreSQL ON DELETE CASCADE across the 3 dependent child tables.
  *
- * Called with no `patient_id` parameter, this instead sweeps and purges ALL leftover
- * ephemeral sandbox patients (mrn LIKE 'CASCADE-TEST-%') left behind by prior demo
- * sessions, guaranteeing the Constraints Lab always starts from a pristine, reproducible
- * state regardless of whether a previous demo was manually cleaned up.
+ * If called with neither `full_name` nor `patient_id`, sweeps all leftover sandbox patients.
  */
 export async function DELETE(request: NextRequest) {
   try {
     await requireRole(request, ['DOCTOR', 'ADMIN']);
 
     const { searchParams } = new URL(request.url);
+    const fullName = searchParams.get('full_name')?.trim();
     const patientId = parseInt(searchParams.get('patient_id') || '0', 10);
 
-    if (!patientId) {
+    if (!fullName && !patientId) {
       const swept = await query(
-        `DELETE FROM patients WHERE mrn LIKE 'CASCADE-TEST-%' RETURNING patient_id, mrn;`,
+        `DELETE FROM patients WHERE mrn LIKE 'CASCADE-TEST-%' RETURNING patient_id, mrn, full_name;`,
         [],
         'ADMIN'
       );
@@ -145,36 +183,68 @@ export async function DELETE(request: NextRequest) {
       });
     }
 
-    // Capture counts before deletion
-    const beforeRx = await query(`SELECT count(*) FROM prescriptions WHERE patient_id = $1;`, [patientId], 'ADMIN');
-    const beforeAssess = await query(`SELECT count(*) FROM risk_assessments WHERE patient_id = $1;`, [patientId], 'ADMIN');
+    let targetId = patientId;
+    let targetName = fullName || '';
+
+    if (fullName) {
+      const pLookup = await query(
+        `SELECT patient_id, mrn, full_name FROM patients WHERE full_name = $1;`,
+        [fullName],
+        'ADMIN'
+      );
+      if (pLookup.rows.length === 0) {
+        return NextResponse.json(
+          { success: false, error: `Patient with full_name "${fullName}" not found or already deleted.` },
+          { status: 404 }
+        );
+      }
+      targetId = pLookup.rows[0].patient_id;
+      targetName = pLookup.rows[0].full_name;
+    } else {
+      const pLookup = await query(
+        `SELECT patient_id, mrn, full_name FROM patients WHERE patient_id = $1;`,
+        [patientId],
+        'ADMIN'
+      );
+      if (pLookup.rows.length > 0) {
+        targetName = pLookup.rows[0].full_name;
+      }
+    }
+
+    // Capture counts before deletion across the 4 cascading tables
+    const beforeP = await query(`SELECT count(*) FROM patients WHERE full_name = $1;`, [targetName], 'ADMIN');
+    const beforeRx = await query(`SELECT count(*) FROM prescriptions WHERE patient_id = $1;`, [targetId], 'ADMIN');
+    const beforeAssess = await query(`SELECT count(*) FROM risk_assessments WHERE patient_id = $1;`, [targetId], 'ADMIN');
     const beforeFindings = await query(
       `SELECT count(*) FROM assessment_findings af JOIN risk_assessments ra ON af.assessment_id = ra.assessment_id WHERE ra.patient_id = $1;`,
-      [patientId],
+      [targetId],
       'ADMIN'
     );
 
     const startTime = Date.now();
-    // Execute Parent Deletion
-    await query(`DELETE FROM patients WHERE patient_id = $1;`, [patientId], 'ADMIN');
+    // Execute Parent Deletion using full_name only (as requested by evaluator)
+    await query(`DELETE FROM patients WHERE full_name = $1;`, [targetName], 'ADMIN');
     const executionMs = Date.now() - startTime;
 
     // Verify all child counts are now 0
-    const afterP = await query(`SELECT count(*) FROM patients WHERE patient_id = $1;`, [patientId], 'ADMIN');
-    const afterRx = await query(`SELECT count(*) FROM prescriptions WHERE patient_id = $1;`, [patientId], 'ADMIN');
-    const afterAssess = await query(`SELECT count(*) FROM risk_assessments WHERE patient_id = $1;`, [patientId], 'ADMIN');
+    const afterP = await query(`SELECT count(*) FROM patients WHERE full_name = $1;`, [targetName], 'ADMIN');
+    const afterRx = await query(`SELECT count(*) FROM prescriptions WHERE patient_id = $1;`, [targetId], 'ADMIN');
+    const afterAssess = await query(`SELECT count(*) FROM risk_assessments WHERE patient_id = $1;`, [targetId], 'ADMIN');
     const afterFindings = await query(
       `SELECT count(*) FROM assessment_findings af JOIN risk_assessments ra ON af.assessment_id = ra.assessment_id WHERE ra.patient_id = $1;`,
-      [patientId],
+      [targetId],
       'ADMIN'
     );
 
     return NextResponse.json({
       success: true,
-      patientId,
+      patientId: targetId,
+      fullName: targetName,
+      sqlExecuted: `DELETE FROM patients WHERE full_name = '${targetName}';`,
+      deletedBy: 'full_name',
       executionMs,
       beforeCounts: {
-        patients: 1,
+        patients: Number(beforeP.rows[0].count),
         prescriptions: Number(beforeRx.rows[0].count),
         risk_assessments: Number(beforeAssess.rows[0].count),
         assessment_findings: Number(beforeFindings.rows[0].count),
@@ -185,7 +255,7 @@ export async function DELETE(request: NextRequest) {
         risk_assessments: Number(afterAssess.rows[0].count),
         assessment_findings: Number(afterFindings.rows[0].count),
       },
-      summary: `Atomic PostgreSQL ON DELETE CASCADE verified. 1 patient record and all related child records in 3 dependent tables were automatically purged.`,
+      summary: `Atomic PostgreSQL ON DELETE CASCADE verified. Patient record '${targetName}' deleted using full_name, and all related child records in 3 dependent tables were automatically purged.`,
     });
   } catch (error: any) {
     return handleAuthError(error);

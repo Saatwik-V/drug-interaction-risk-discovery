@@ -67,7 +67,7 @@ export default function DbmsStudioPage() {
   const [triggerLoading, setTriggerLoading] = useState(false);
 
   // Tab 3: Stored Procedures State
-  const [procedurePatientId, setProcedurePatientId] = useState<number>(1);
+  const [procedurePatientName, setProcedurePatientName] = useState<string>('Robert Vance');
   const [procedureDoctor, setProcedureDoctor] = useState('dr_sharma');
   const [procedureNotes, setProcedureNotes] = useState('Evaluation studio direct screening test');
   const [procedureResult, setProcedureResult] = useState<any | null>(null);
@@ -324,12 +324,16 @@ export default function DbmsStudioPage() {
       const res = await fetch('/api/dbms/constraints/test-cascade', { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        setEphemeralPatient({ id: data.patientId, mrn: data.mrn });
+        setEphemeralPatient({
+          id: data.patientId,
+          mrn: data.mrn,
+          fullName: data.fullName || `Test-Cascade-Patient-${data.patientId}`,
+        });
         setCascadeCounts(data.counts);
         addToast({
           type: 'success',
           title: 'Spawned Ephemeral Patient',
-          message: `Created patient #${data.patientId} with 2 prescriptions, 1 assessment, 2 findings.`,
+          message: `Created patient "${data.fullName}" with 2 prescriptions, 1 assessment, 2 findings.`,
         });
       }
     } finally {
@@ -341,9 +345,13 @@ export default function DbmsStudioPage() {
     if (!ephemeralPatient) return;
     setCascadeLoading(true);
     try {
-      const res = await fetch(`/api/dbms/constraints/test-cascade?patient_id=${ephemeralPatient.id}`, {
-        method: 'DELETE',
-      });
+      // Execute deletion using full_name parameter directly from patients table
+      const res = await fetch(
+        `/api/dbms/constraints/test-cascade?full_name=${encodeURIComponent(ephemeralPatient.fullName)}`,
+        {
+          method: 'DELETE',
+        }
+      );
       const data = await res.json();
       setCascadeResult(data);
       setCascadeCounts(data.afterCounts);
@@ -439,18 +447,26 @@ export default function DbmsStudioPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          patientId: procedurePatientId,
+          patientName: procedurePatientName.trim(),
           doctorUsername: procedureDoctor,
           notes: procedureNotes,
         }),
       });
       const data = await res.json();
       setProcedureResult(data);
-      addToast({
-        type: 'success',
-        title: 'PL/pgSQL Procedure Executed',
-        message: `Returned ${data.rowsReturned} rows in ${data.executionMs}ms.`,
-      });
+      if (data.success) {
+        addToast({
+          type: 'success',
+          title: 'PL/pgSQL Procedure Executed',
+          message: `Returned ${data.rowsReturned} rows for "${data.patientName}" in ${data.executionMs}ms.`,
+        });
+      } else {
+        addToast({
+          type: 'error',
+          title: 'Procedure Execution Failed',
+          message: data.error || 'The stored function raised an error.',
+        });
+      }
     } finally {
       setProcedureLoading(false);
     }
@@ -798,7 +814,7 @@ export default function DbmsStudioPage() {
               B. Live Demonstration of ON DELETE CASCADE Across 4 Relational Tables
             </h2>
             <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: 4 }}>
-              Demonstrates automatic cascading deletion from <code>patients</code> &rarr; <code>prescriptions</code> &rarr; <code>risk_assessments</code> &rarr; <code>assessment_findings</code>.
+              Demonstrates automatic cascading deletion using <code>full_name</code> from <code>patients</code> &rarr; <code>prescriptions</code> &rarr; <code>risk_assessments</code> &rarr; <code>assessment_findings</code>.
             </p>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 18 }}>
@@ -822,7 +838,11 @@ export default function DbmsStudioPage() {
                     }}
                   >
                     <div style={{ color: '#a5b4fc', fontWeight: 600, fontSize: '0.85rem' }}>
-                      Ephemeral Test Patient Ready: #{ephemeralPatient.id} ({ephemeralPatient.mrn})
+                      Ephemeral Test Patient Ready:{' '}
+                      <span style={{ color: '#38bdf8', fontFamily: 'var(--font-mono)' }}>
+                        &quot;{ephemeralPatient.fullName}&quot;
+                      </span>{' '}
+                      (ID: #{ephemeralPatient.id}, MRN: {ephemeralPatient.mrn})
                     </div>
                     <button
                       onClick={handleDeleteCascadePatient}
@@ -836,15 +856,20 @@ export default function DbmsStudioPage() {
                         marginTop: 12,
                       }}
                     >
-                      {cascadeLoading ? 'Cascading Deletion...' : '2. Delete Parent Patient (ON DELETE CASCADE)'}
+                      {cascadeLoading
+                        ? 'Cascading Deletion...'
+                        : `2. Delete Patient by full_name: "${ephemeralPatient.fullName}"`}
                     </button>
                   </div>
                 )}
 
                 <div style={{ marginTop: 16 }}>
                   <SqlCodeViewer
-                    title="Cascading Relational Constraints"
-                    code={`-- Foreign keys configured in schema:
+                    title="Executed DML & Cascading Relational Constraints"
+                    code={`-- 1. Targeted deletion executed using full_name on parent table:
+DELETE FROM patients WHERE full_name = '${ephemeralPatient ? ephemeralPatient.fullName : 'Test-Cascade-Patient-XXXX'}';
+
+-- 2. Foreign keys automatically cascade to 3 dependent child tables:
 ALTER TABLE prescriptions ADD CONSTRAINT fk_prescription_patient 
     FOREIGN KEY (patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE;
 ALTER TABLE risk_assessments ADD CONSTRAINT fk_assessment_patient 
@@ -914,10 +939,10 @@ ALTER TABLE assessment_findings ADD CONSTRAINT fk_finding_assessment
 
                   {cascadeResult && (
                     <VerifyOnDisk
-                      query={`SELECT count(*) FROM prescriptions WHERE patient_id = ${cascadeResult.patientId};\nSELECT count(*) FROM risk_assessments WHERE patient_id = ${cascadeResult.patientId};`}
-                      expected={`All child row counts return 0 — patient #${cascadeResult.patientId} and its 3 dependent tables were purged atomically.`}
+                      query={`-- 1. Verify parent deleted by full_name:\nSELECT count(*) FROM patients WHERE full_name = '${cascadeResult.fullName}';\n-- 2. Verify cascading deletion across child tables:\nSELECT count(*) FROM prescriptions WHERE patient_id = ${cascadeResult.patientId};\nSELECT count(*) FROM risk_assessments WHERE patient_id = ${cascadeResult.patientId};`}
+                      expected={`All child row counts return 0 — patient '${cascadeResult.fullName}' and its 3 dependent tables were purged atomically.`}
                       onReRead={async () => {
-                        const res = await fetch(`/api/dbms/constraints/test-cascade?patient_id=${cascadeResult.patientId}`);
+                        const res = await fetch(`/api/dbms/constraints/test-cascade?full_name=${encodeURIComponent(cascadeResult.fullName)}`);
                         const data = await res.json();
                         return `patients=${data.counts.patients}, prescriptions=${data.counts.prescriptions}, risk_assessments=${data.counts.risk_assessments}, assessment_findings=${data.counts.assessment_findings}`;
                       }}
@@ -1199,14 +1224,32 @@ FOR EACH ROW EXECUTE FUNCTION fn_update_assessment_counts();`}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: 4 }}>
-                    Patient ID (e.g. 1, 2, 3):
+                    Patient Full Name (e.g. Robert Vance, Sarah Connor, James Wilson, Diana Prince):
                   </label>
-                  <input
-                    type="number"
-                    className="input-field"
-                    value={procedurePatientId}
-                    onChange={(e) => setProcedurePatientId(Number(e.target.value))}
-                  />
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      type="text"
+                      className="input-field"
+                      value={procedurePatientName}
+                      onChange={(e) => setProcedurePatientName(e.target.value)}
+                      placeholder="e.g. Robert Vance"
+                      style={{ flex: 1 }}
+                    />
+                    <select
+                      className="input-field"
+                      style={{ width: 'auto', minWidth: 175, fontSize: '0.8rem' }}
+                      value={procedurePatientName}
+                      onChange={(e) => setProcedurePatientName(e.target.value)}
+                    >
+                      <option value="Robert Vance">Robert Vance (Patient 1)</option>
+                      <option value="Sarah Connor">Sarah Connor (Patient 2)</option>
+                      <option value="James Wilson">James Wilson (Patient 3)</option>
+                      <option value="Diana Prince">Diana Prince (Patient 4)</option>
+                    </select>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 4 }}>
+                    Using unique <code>full_name</code> from <code>patients</code> table to invoke the overloaded PL/pgSQL function.
+                  </div>
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: 4 }}>
@@ -1243,9 +1286,9 @@ FOR EACH ROW EXECUTE FUNCTION fn_update_assessment_counts();`}
 
               <div style={{ marginTop: 16 }}>
                 <SqlCodeViewer
-                  title="Invocation SQL"
+                  title="Invocation SQL (Executes by full_name)"
                   code={`SELECT * FROM fn_perform_patient_direct_screening(
-    ${procedurePatientId}, 
+    '${procedurePatientName}', 
     '${procedureDoctor}', 
     '${procedureNotes}'
 );`}
@@ -1255,11 +1298,24 @@ FOR EACH ROW EXECUTE FUNCTION fn_update_assessment_counts();`}
             </div>
 
             <div>
-              {procedureResult ? (
+              {procedureResult && !procedureResult.success ? (
+                <div
+                  style={{
+                    padding: 14,
+                    borderRadius: 8,
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid rgba(239, 68, 68, 0.4)',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  <strong style={{ color: '#ef4444' }}>🛡️ Function Raised an Error:</strong>{' '}
+                  <span style={{ color: '#f8fafc' }}>{procedureResult.error}</span>
+                </div>
+              ) : procedureResult ? (
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                     <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#f8fafc' }}>
-                      Returned Table Result ({procedureResult.rowsReturned} rows)
+                      Returned Table Result ({procedureResult.rowsReturned} rows for &quot;{procedureResult.patientName}&quot;)
                     </span>
                     <span style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: '#38bdf8' }}>
                       ⚡ Executed in {procedureResult.executionMs}ms

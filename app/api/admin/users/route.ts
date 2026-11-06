@@ -95,6 +95,18 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
+    // Without this check, DROP USER IF EXISTS and DELETE ... WHERE username=…
+    // both silently affect zero rows for a username that was never real,
+    // and the endpoint reported success anyway — misleading for a demo
+    // where "delete this account" should mean something concrete happened.
+    const existing = await getAllUsers();
+    if (!existing.some((u) => u.username.toLowerCase() === username)) {
+      return NextResponse.json(
+        { success: false, error: `No account named '${username}' exists.` },
+        { status: 404 }
+      );
+    }
+
     const result = await deleteUser(username);
 
     return NextResponse.json({

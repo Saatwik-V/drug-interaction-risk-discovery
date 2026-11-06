@@ -72,6 +72,7 @@ GRANT USAGE, SELECT ON SEQUENCE assessment_findings_finding_id_seq TO role_docto
 
 -- Execution of stored evaluation procedures
 GRANT EXECUTE ON FUNCTION fn_perform_patient_direct_screening(INT, VARCHAR, TEXT) TO role_doctor;
+GRANT EXECUTE ON FUNCTION fn_perform_patient_direct_screening(VARCHAR, VARCHAR, TEXT) TO role_doctor;
 GRANT EXECUTE ON FUNCTION fn_update_assessment_counts() TO role_doctor;
 
 -- CRITICAL SECURITY BOUNDARY:
